@@ -1,9 +1,0 @@
-{
-	"RemapUnityFiles": 
-	{
-		"Module.furcraeaHLSLEditor.gen.cpp.obj": [
-			"CodeMaterialAsset.gen.cpp.obj",
-			"furcraeaHLSLEditor.init.gen.cpp.obj"
-		]
-	}
-}
