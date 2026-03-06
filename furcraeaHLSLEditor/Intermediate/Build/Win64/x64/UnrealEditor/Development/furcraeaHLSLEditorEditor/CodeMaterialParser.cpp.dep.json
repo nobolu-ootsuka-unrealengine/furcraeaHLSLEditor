@@ -1,0 +1,14 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\sandbox\\ue57createplugin4\\ue57hlsledit\\ue57hlsledit\\plugins\\furcraeahlsleditor\\source\\furcraeahlsleditoreditor\\private\\codematerialparser.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\sandbox\\ue57createplugin4\\ue57hlsledit\\ue57hlsledit\\intermediate\\build\\win64\\x64\\ue57hlslediteditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.valexpapi.cpp20.h.pch",
+        "Includes": [
+            "d:\\sandbox\\ue57createplugin4\\ue57hlsledit\\ue57hlsledit\\plugins\\furcraeahlsleditor\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\furcraeahlsleditoreditor\\definitions.furcraeahlsleditoreditor.h",
+            "d:\\sandbox\\ue57createplugin4\\ue57hlsledit\\ue57hlsledit\\plugins\\furcraeahlsleditor\\source\\furcraeahlsleditoreditor\\public\\codematerialparser.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

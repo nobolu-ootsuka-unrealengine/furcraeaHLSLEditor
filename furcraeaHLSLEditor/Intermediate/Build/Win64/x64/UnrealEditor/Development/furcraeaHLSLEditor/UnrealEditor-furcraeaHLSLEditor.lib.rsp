@@ -1,0 +1,16 @@
+/NOLOGO
+/errorReport:prompt
+/MACHINE:x64
+/SUBSYSTEM:WINDOWS
+/DEF
+/NAME:"UnrealEditor-furcraeaHLSLEditor.dll"
+/IGNORE:4221
+/NODEFAULTLIB
+"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Intermediate/Build/Win64/x64/UE57HLSLEditEditor/Development/UnrealEd/SharedPCH.UnrealEd.Project.ValApi.ValExpApi.Cpp20.h.obj"
+"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Plugins/furcraeaHLSLEditor/Intermediate/Build/Win64/x64/UnrealEditor/Development/furcraeaHLSLEditor/Module.furcraeaHLSLEditor.gen.cpp.obj"
+"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Plugins/furcraeaHLSLEditor/Intermediate/Build/Win64/x64/UnrealEditor/Development/furcraeaHLSLEditor/CodeMaterialAsset.cpp.obj"
+"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Plugins/furcraeaHLSLEditor/Intermediate/Build/Win64/x64/UnrealEditor/Development/furcraeaHLSLEditor/CodeMaterialCompiler.cpp.obj"
+"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Plugins/furcraeaHLSLEditor/Intermediate/Build/Win64/x64/UnrealEditor/Development/furcraeaHLSLEditor/furcraeaHLSLEditorModule.cpp.obj"
+"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Plugins/furcraeaHLSLEditor/Intermediate/Build/Win64/x64/UnrealEditor/Development/furcraeaHLSLEditor/PerModuleInline.gen.cpp.obj"
+"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Plugins/furcraeaHLSLEditor/Intermediate/Build/Win64/x64/UnrealEditor/Development/furcraeaHLSLEditor/Default.rc2.res"
+/OUT:"D:/Sandbox/UE57CreatePlugin4/UE57HLSLEdit/UE57HLSLEdit/Plugins/furcraeaHLSLEditor/Intermediate/Build/Win64/x64/UnrealEditor/Development/furcraeaHLSLEditor/UnrealEditor-furcraeaHLSLEditor.lib"

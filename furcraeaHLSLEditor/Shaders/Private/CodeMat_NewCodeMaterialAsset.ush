@@ -1,0 +1,12 @@
+// CodeMaterialAsset template
+// You can write free HLSL here (functions, structs, includes, etc.).
+// This text will be written to:
+//   Plugins/furcraeaHLSLEditor/Shaders/Private/CodeMatUser.ush
+// and included from the material custom node.
+
+#pragma once
+
+float3 MainHLSL(float2 uv)
+{
+    return float3(uv.x, uv.y, 0.0);
+}
