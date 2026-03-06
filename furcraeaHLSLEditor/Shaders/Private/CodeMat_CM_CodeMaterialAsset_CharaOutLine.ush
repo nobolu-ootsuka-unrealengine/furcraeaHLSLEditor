@@ -1,0 +1,16 @@
+#pragma once
+
+  // @param float  OutlineWidth = 2.0
+  // @param float3 OutlineColor = 0.0,0.0,0.0
+
+  // World Position Offset: 頂点を法線方向に膨らませる（アウトラインシェル）
+  float3 MainWPO(float3 VertexNormal, float OutlineWidth)
+  {
+      return VertexNormal * OutlineWidth;
+  }
+
+  // ピクセル出力: 単色アウトライン色
+  float3 MainHLSL(float2 uv, float3 OutlineColor)
+  {
+      return OutlineColor;
+  }

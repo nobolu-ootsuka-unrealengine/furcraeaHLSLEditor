@@ -261,12 +261,12 @@ float3 MainHLSL(float2 uv)
 
 		// 3) Entry signature
 		const FRegexPattern EntryPat(
-			TEXT("\\bfloat3\\s+MainHLSL\\s*\\(\\s*float2\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\)")
+			TEXT("\\bfloat3\\s+MainHLSL\\s*\\(\\s*float2\\s+[A-Za-z_][A-Za-z0-9_]*")
 		);
 		FRegexMatcher EntryM(EntryPat, Stripped);
 		if (!EntryM.FindNext())
 		{
-			OutError = TEXT("Entry signature must be: float3 MainHLSL(float2 uv)");
+			OutError = TEXT("Entry signature must be: float3 MainHLSL(float2 uv, ...");
 			return false;
 		}
 
@@ -293,11 +293,11 @@ float3 MainHLSL(float2 uv)
 	static bool ExtractMainBody(const FString& Stripped, FString& OutBody, FString& OutError)
 	{
 		// Main( ... ) ‚ÌŒã‚ë‚Ì '{' ‚ð’T‚·
-		const FRegexPattern MainHeadPat(TEXT("\\bfloat3\\s+MainHLSL\\s*\\(\\s*float2\\s+[A-Za-z_][A-Za-z0-9_]*\\s*\\)"));
+		const FRegexPattern MainHeadPat(TEXT("\\bfloat3\\s+MainHLSL\\s*\\(\\s*float2\\s+[A-Za-z_][A-Za-z0-9_]*"));
 		FRegexMatcher HeadM(MainHeadPat, Stripped);
 		if (!HeadM.FindNext())
 		{
-			OutError = TEXT("Entry signature must be: float3 MainHLSL(float2 uv)");
+			OutError = TEXT("Entry signature must be: float3 MainHLSL(float2 uv, ...");
 			return false;
 		}
 
