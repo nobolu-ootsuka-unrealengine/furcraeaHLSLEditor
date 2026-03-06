@@ -3,13 +3,15 @@
 #include "CodeMaterialCompiler.h"
 #include "CodeMaterialAsset.h"
 
+#if WITH_EDITOR
+
 #include "Materials/Material.h"
 #include "Materials/MaterialExpressionCustom.h"
 #include "MaterialEditingLibrary.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Misc/PackageName.h"
-#include "EditorAssetLibrary.h" // š’Ç‰Á
+#include "EditorAssetLibrary.h" // ï¿½ï¿½ï¿½Ç‰ï¿½
 #include "ObjectTools.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 
@@ -45,18 +47,18 @@ static bool WriteUserUshFile(
 
     const FString DiskPath = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Shaders/Private"), FileName);
 
-    // Material ‚ª #include ‚ÅŒ©‚é‚Ì‚Í‚±‚ê
+    // Material ï¿½ï¿½ #include ï¿½ÅŒï¿½ï¿½ï¿½Ì‚Í‚ï¿½ï¿½ï¿½
     OutVirtualIncludePath = FString::Printf(TEXT("/Plugin/furcraeaHLSLEditor/Private/%s"), *FileName);
 
 
-    // æ“ª‚É #pragma once ‚ğ‹­§•t—^iƒ†[ƒU[‚ª‘‚¢‚Ä‚àOKj
+    // ï¿½æ“ªï¿½ï¿½ #pragma once ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½tï¿½^ï¿½iï¿½ï¿½ï¿½[ï¿½Uï¿½[ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä‚ï¿½OKï¿½j
     FString TextToWrite = UserCode;
     if (!TextToWrite.Contains(TEXT("#pragma once")))
     {
         TextToWrite = FString(TEXT("#pragma once\n\n")) + TextToWrite;
     }
 
-    // ‰üs“ˆê‚È‚Çi”CˆÓj
+    // ï¿½ï¿½ï¿½sï¿½ï¿½ï¿½ï¿½È‚Çiï¿½Cï¿½Ój
     TextToWrite.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
     TextToWrite.ReplaceInline(TEXT("\r"), TEXT("\n"));
 
@@ -80,7 +82,7 @@ static void BuildCustomNode_ToBaseColor(UMaterial* Material, const FString& Hlsl
 static FString MakeMaterialPackagePath(const UCodeMaterialAsset* Asset)
 {
     FString AssetName = Asset ? Asset->GetName() : TEXT("Unknown");
-    AssetName = ObjectTools::SanitizeObjectName(AssetName); // šˆÀ‘S‰»
+    AssetName = ObjectTools::SanitizeObjectName(AssetName); // ï¿½ï¿½ï¿½ï¿½ï¿½Sï¿½ï¿½
     return FString::Printf(TEXT("/Game/Generated/M_%s"), *AssetName);
 }
 
@@ -88,7 +90,7 @@ static UMaterial* CreateOrLoadMaterial(UCodeMaterialAsset* Asset)
 {
     if (!Asset) return nullptr;
 
-    // š /Game/Generated ‚ğì‚éiContent Browserã‚ÌƒtƒHƒ‹ƒ_j
+    // ï¿½ï¿½ /Game/Generated ï¿½ï¿½ï¿½ï¿½ï¿½iContent Browserï¿½ï¿½Ìƒtï¿½Hï¿½ï¿½ï¿½_ï¿½j
     UEditorAssetLibrary::MakeDirectory(TEXT("/Game/Generated"));
 
     if (Asset->OutputMaterial)
@@ -97,13 +99,13 @@ static UMaterial* CreateOrLoadMaterial(UCodeMaterialAsset* Asset)
     }
 
     const FString PackagePath = MakeMaterialPackagePath(Asset); // /Game/Generated/M_xxx
-    const FString PackageName = PackagePath;                    // CreatePackage‚Íƒtƒ‹ƒpƒXOK
+    const FString PackageName = PackagePath;                    // CreatePackageï¿½Íƒtï¿½ï¿½ï¿½pï¿½XOK
     const FString AssetName = FPackageName::GetLongPackageAssetName(PackagePath);
 
     UPackage* Package = CreatePackage(*PackageName);
     if (!Package) return nullptr;
 
-    // Šù‚É“¯–¼‚ª‚ ‚é‚È‚ç‚»‚ê‚ğE‚¤
+    // ï¿½ï¿½ï¿½É“ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È‚ç‚»ï¿½ï¿½ï¿½ï¿½Eï¿½ï¿½
     if (UMaterial* Existing = FindObject<UMaterial>(Package, *AssetName))
     {
         Asset->OutputMaterial = Existing;
@@ -124,10 +126,10 @@ static UMaterial* CreateOrLoadMaterial(UCodeMaterialAsset* Asset)
     UMaterial* Mat = Cast<UMaterial>(NewObj);
     if (!Mat) return nullptr;
 
-    // Asset Registry ‚É’Ê’miContent Browser‚Éo‚·j
+    // Asset Registry ï¿½É’Ê’mï¿½iContent Browserï¿½Éoï¿½ï¿½ï¿½j
     FAssetRegistryModule::AssetCreated(Mat);
 
-    // ƒpƒbƒP[ƒWDirty
+    // ï¿½pï¿½bï¿½Pï¿½[ï¿½WDirty
     Mat->MarkPackageDirty();
 
     Asset->OutputMaterial = Mat;
@@ -160,20 +162,20 @@ bool CodeMat::CompileCodeAssetToMaterial(
     }
 
 #if WITH_EDITOR
-    // š ‚Ü‚¸ .ush ‚ğXV
+    // ï¿½ï¿½ ï¿½Ü‚ï¿½ .ush ï¿½ï¿½ï¿½Xï¿½V
     FString VirtualIncludePath;
     if (!WriteUserUshFile(Asset, Asset->HlslCode, VirtualIncludePath, OutError))
     {
         return false;
     }
 
-    // š ‚±‚ê‚ª–³‚¢‚Æ•ÏX‚ªE‚í‚ê‚É‚­‚¢‚±‚Æ‚ª‚ ‚é
+    // ï¿½ï¿½ ï¿½ï¿½ï¿½ê‚ªï¿½ï¿½ï¿½ï¿½ï¿½Æ•ÏXï¿½ï¿½ï¿½Eï¿½ï¿½ï¿½É‚ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Æ‚ï¿½ï¿½ï¿½ï¿½ï¿½
     FlushShaderFileCache();
 #endif
 
     BuildCustomNode_ToBaseColor(Mat, VirtualIncludePath);
 
-    // šd—vF•Û‘¶‚µ‚È‚¢‚Æ /Game/Generated ‚ªŒ©‚¦‚È‚¢/o‚È‚¢‚±‚Æ‚ª‚ ‚é
+    // ï¿½ï¿½ï¿½dï¿½vï¿½Fï¿½Û‘ï¿½ï¿½ï¿½ï¿½È‚ï¿½ï¿½ï¿½ /Game/Generated ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È‚ï¿½/ï¿½oï¿½È‚ï¿½ï¿½ï¿½ï¿½Æ‚ï¿½ï¿½ï¿½ï¿½ï¿½
     UEditorAssetLibrary::SaveLoadedAsset(Mat, /*bOnlyIfIsDirty*/ false);
 
     OutMaterial = Mat;
@@ -192,7 +194,7 @@ static void BuildCustomNode_ToBaseColor(UMaterial* Material, const FString& Virt
 
     UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
 
-    // 1) TextureCoordinate ƒm[ƒh‚ğì‚é
+    // 1) TextureCoordinate ï¿½mï¿½[ï¿½hï¿½ï¿½ï¿½ï¿½ï¿½
     auto* TexCoord = Cast<UMaterialExpressionTextureCoordinate>(
         UMaterialEditingLibrary::CreateMaterialExpression(
             Material,
@@ -202,7 +204,7 @@ static void BuildCustomNode_ToBaseColor(UMaterial* Material, const FString& Virt
     if (!TexCoord) return;
     TexCoord->CoordinateIndex = 0; // UV0
 
-    // 2) Custom ƒm[ƒh‚ğì‚é
+    // 2) Custom ï¿½mï¿½[ï¿½hï¿½ï¿½ï¿½ï¿½ï¿½
     auto* Custom = Cast<UMaterialExpressionCustom>(
         UMaterialEditingLibrary::CreateMaterialExpression(
             Material,
@@ -216,24 +218,24 @@ static void BuildCustomNode_ToBaseColor(UMaterial* Material, const FString& Virt
     Custom->IncludeFilePaths.Reset();
     Custom->IncludeFilePaths.Add(VirtualIncludePath);
 
-    // 3) Custom Input gUVh ‚ğ’Ç‰Á‚µ‚Ä TexCoord ‚ğÚ‘±
+    // 3) Custom Input ï¿½gUVï¿½h ï¿½ï¿½Ç‰ï¿½ï¿½ï¿½ï¿½ï¿½ TexCoord ï¿½ï¿½Ú‘ï¿½
     {
         FCustomInput& UVInput = Custom->Inputs.AddDefaulted_GetRef();
         UVInput.InputName = TEXT("UV");
 
-        // TexCoord ‚Ìo—Í(0)‚ğ Custom “ü—Í‚Ö
+        // TexCoord ï¿½Ìoï¿½ï¿½(0)ï¿½ï¿½ Custom ï¿½ï¿½ï¿½Í‚ï¿½
         UVInput.Input.Expression = TexCoord;
         UVInput.Input.OutputIndex = 0;
     }
 
-    // 4) Custom ‚ÌƒR[ƒh‚Í Parameters ‚ğG‚ç‚¸A“ü—ÍUV‚ğg‚¤
+    // 4) Custom ï¿½ÌƒRï¿½[ï¿½hï¿½ï¿½ Parameters ï¿½ï¿½Gï¿½ç‚¸ï¿½Aï¿½ï¿½ï¿½ï¿½UVï¿½ï¿½ï¿½gï¿½ï¿½
     Custom->Code =
         TEXT("return MainHLSL(UV);\n");
 
-    // BaseColor‚ÖÚ‘±
+    // BaseColorï¿½ÖÚ‘ï¿½
     //UMaterialEditingLibrary::ConnectMaterialProperty(Custom, TEXT(""), MP_BaseColor);
     
-    //Emissive ‚ÉŒq‚®”Å
+    //Emissive ï¿½ÉŒqï¿½ï¿½ï¿½ï¿½
     UMaterialEditingLibrary::ConnectMaterialProperty(Custom, TEXT(""), MP_EmissiveColor);
     Material->BlendMode = BLEND_Opaque;
     Material->SetShadingModel(MSM_Unlit);
@@ -244,3 +246,5 @@ static void BuildCustomNode_ToBaseColor(UMaterial* Material, const FString& Virt
     Material->PostEditChange();
     Material->MarkPackageDirty();
 }
+
+#endif // WITH_EDITOR

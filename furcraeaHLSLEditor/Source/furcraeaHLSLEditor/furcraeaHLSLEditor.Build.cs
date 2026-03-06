@@ -7,7 +7,7 @@ public class furcraeaHLSLEditor : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 
-        // š ‚±‚±‚É“ü‚ê‚é
+        // ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½É“ï¿½ï¿½ï¿½ï¿½
         bUseUnity = false;
 
         PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
@@ -19,17 +19,21 @@ public class furcraeaHLSLEditor : ModuleRules
             "CoreUObject",
             "Engine"
         });
-		
-		if (Target.bBuildEditor)
+
+        // Projects (IPluginManager) ã¨ RenderCore (ShaderCore) ã¯ãƒ©ãƒ³ã‚¿ã‚¤ãƒ ã§ã‚‚å¿…è¦
+        PrivateDependencyModuleNames.AddRange(new string[]
+        {
+            "Projects",
+            "RenderCore",
+        });
+
+        if (Target.bBuildEditor)
         {
             PrivateDependencyModuleNames.AddRange(new string[]
             {
                 "UnrealEd",
                 "MaterialEditor",
                 "EditorScriptingUtilities",
-                // ShaderCore ‚Í‚à‚¤–³‚¢ ¨ RenderCore ‚É
-                "RenderCore",
-                "Projects", // š’Ç‰ÁFIPluginManager —p
             });
         }
     }
