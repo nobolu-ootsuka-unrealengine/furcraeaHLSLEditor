@@ -13,6 +13,8 @@
 		}
 	],
 
+	"ShadersDirectory": "Shaders",
+
 	"Modules": [
 		{
 			"Name": "furcraeaHLSLEditor",

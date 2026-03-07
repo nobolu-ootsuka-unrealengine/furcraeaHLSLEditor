@@ -1,27 +1,36 @@
-//D:\Sandbox\UE57CreatePlugin4\UE57HLSLEdit\UE57HLSLEdit\Plugins\furcraeaHLSLEditor\Source\furcraeaHLSLEditor\Private\CodeMaterialAsset.cpp
+// Plugins/furcraeaHLSLEditor/Source/furcraeaHLSLEditor/Private/CodeMaterialAsset.cpp
 
 #include "CodeMaterialAsset.h"
-#include "CodeMaterialCompiler.h" // © Public ‚É‚ ‚é‚â‚Â
+#include "CodeMaterialCompiler.h"
 
 UCodeMaterialAsset::UCodeMaterialAsset()
 {
-    // g‰Šúó‘Ô‚Å‰½‚à–³‚¢h‚¾‚ÆƒGƒfƒBƒ^‚ÌŒ©‚½–Ú‚ªâ‚µ‚¢‚Ì‚ÅAÅ¬‚Ìƒeƒ“ƒvƒŒ‚ğ“ü‚ê‚é
-    // i‚ ‚È‚½‚Ìƒp[ƒT/ƒWƒFƒlƒŒ[ƒ^d—l‚É‡‚í‚¹‚ÄA‚±‚±‚ÍD‚«‚É•Ï‚¦‚ÄOKj
+    // Default template: character outline (cel shader â€” shell extrusion)
+    // Demonstrates @param auto-wiring and WPO usage.
 
-    HlslCode =
-        TEXT("// CodeMaterialAsset template\n")
-        TEXT("// You can write free HLSL here (functions, structs, includes, etc.).\n")
-        TEXT("// This text will be written to:\n")
-        TEXT("//   Plugins/furcraeaHLSLEditor/Shaders/Private/CodeMatUser.ush\n")
-        TEXT("// and included from the material custom node.\n")
+    FragmentShaderCode =
+        TEXT("// Fragment shader â€” Character Outline\n")
+        TEXT("// Entry: float3 FragmentShader(float2 uv, ...) -> EmissiveColor\n")
+        TEXT("//\n")
+        TEXT("// @param float3 OutlineColor = 0.0,0.0,0.0\n")
         TEXT("\n")
-        TEXT("#pragma once\n\n")
-        TEXT("float3 MainHLSL(float2 uv)\n")
+        TEXT("float3 FragmentShader(float2 uv, float3 OutlineColor)\n")
         TEXT("{\n")
-        TEXT("    return float3(uv.x, uv.y, 0.0);\n")
+        TEXT("    return OutlineColor;\n")
         TEXT("}\n");
 
-        
+    VertexShaderCode =
+        TEXT("// Vertex shader â€” Character Outline (Shell Extrusion)\n")
+        TEXT("// Entry: float3 WPO_Main(float3 VertexNormal, ...) -> WorldPositionOffset\n")
+        TEXT("// Leave this pane empty (or all commented out) to disable WPO.\n")
+        TEXT("//\n")
+        TEXT("// @param float OutlineWidth = 0.3\n")
+        TEXT("\n")
+        TEXT("float3 WPO_Main(float3 VertexNormal, float OutlineWidth)\n")
+        TEXT("{\n")
+        TEXT("    return normalize(VertexNormal) * OutlineWidth;\n")
+        TEXT("}\n");
+
     OutputMaterial = nullptr;
 }
 
@@ -29,6 +38,6 @@ UCodeMaterialAsset::UCodeMaterialAsset()
 void UCodeMaterialAsset::PostEditChangeProperty(FPropertyChangedEvent& E)
 {
     Super::PostEditChangeProperty(E);
-    // ©“®ƒRƒ“ƒpƒCƒ‹‚Í‚µ‚È‚¢iSaveƒ{ƒ^ƒ“‘¤‚¾‚¯‚ÉW–ñj
+    // Auto-compile on property change is intentionally disabled (Save button driven)
 }
 #endif

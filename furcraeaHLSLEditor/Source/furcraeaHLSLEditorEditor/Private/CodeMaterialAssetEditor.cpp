@@ -14,6 +14,9 @@
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
+#include "Widgets/Layout/SSplitter.h"
+#include "Widgets/SBoxPanel.h"
+#include "Widgets/Text/STextBlock.h"
 
 #include "Styling/AppStyle.h"
 #include "UObject/Package.h"
@@ -30,14 +33,9 @@
 #define LOCTEXT_NAMESPACE "CodeMaterialAssetEditor"
 
 static const FName CodeMaterialAssetEditorAppIdentifier(TEXT("CodeMaterialAssetEditorApp"));
-static const FName CodeTabId(TEXT("CodeMaterialAssetEditor_CodeTab"));
+static const FName ShaderTabId(TEXT("CodeMaterialAssetEditor_ShaderTab"));
 
-/**
- * ‚±‚±‚ÍuAsset‚ğŠJ‚¢‚½‚Æ‚«‚Éo‚é“Æ©ƒGƒfƒBƒ^v–{‘ÌB
- * - SMultiLineEditableTextBox ‚Å UCodeMaterialAsset::Code ‚ğ•ÒW
- * - Save ‚ÅƒAƒZƒbƒg‚É‘‚«–ß‚µ‚Ä Dirty •t‚¯‚é
- * - ‚Â‚¢‚Å‚É GC ‚É—‚¿‚È‚¢‚æ‚¤QÆ•Û
- */
+/** Custom asset editor toolkit for UCodeMaterialAsset */
 class FCodeMaterialAssetEditorToolkit : public FAssetEditorToolkit, public FGCObject
 {
 public:
@@ -49,9 +47,9 @@ public:
 		Asset = InAsset;
 		check(Asset);
 
-		// ƒŒƒCƒAƒEƒg
+		// ãƒ¬ã‚¤ã‚¢ã‚¦ãƒˆ
 		const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout =
-			FTabManager::NewLayout("CodeMaterialAssetEditor_Layout_v1")
+			FTabManager::NewLayout("CodeMaterialAssetEditor_Layout_v3")
 			->AddArea
 			(
 				FTabManager::NewPrimaryArea()
@@ -59,12 +57,12 @@ public:
 				->Split
 				(
 					FTabManager::NewStack()
-					->AddTab(CodeTabId, ETabState::OpenedTab)
+					->AddTab(ShaderTabId, ETabState::OpenedTab)
 					->SetHideTabWell(true)
 				)
 			);
 
-		// ƒc[ƒ‹ƒLƒbƒg‰Šú‰»
+		//
 		FAssetEditorToolkit::InitAssetEditor(
 			Mode,
 			InitToolkitHost,
@@ -75,7 +73,7 @@ public:
 			Asset.Get()
 		);
 
-		// ƒc[ƒ‹ƒo[Šg’£‚ğ“ü‚ê‚Ä‚©‚çÄ¶¬
+		//
 		ExtendToolbar();
 		RegenerateMenusAndToolbars();
 	}
@@ -94,16 +92,16 @@ public:
 		FAssetEditorToolkit::RegisterTabSpawners(InTabManager);
 
 		InTabManager->RegisterTabSpawner(
-			CodeTabId,
-			FOnSpawnTab::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::SpawnCodeTab)
+			ShaderTabId,
+			FOnSpawnTab::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::SpawnShaderTab)
 		)
-			.SetDisplayName(LOCTEXT("CodeTabTitle", "Code"))
+			.SetDisplayName(LOCTEXT("ShaderTabTitle", "Shaders"))
 			.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Details"));
 	}
 
 	virtual void UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager) override
 	{
-		InTabManager->UnregisterTabSpawner(CodeTabId);
+		InTabManager->UnregisterTabSpawner(ShaderTabId);
 		FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
 	}
 
@@ -113,7 +111,7 @@ public:
 
 	virtual void AddReferencedObjects(FReferenceCollector& Collector) override
 	{
-		// UE5.7 „§FTObjectPtr ‚ğ‚»‚Ì‚Ü‚Ü“n‚·
+		// UE5.7 FTObjectPtr
 		Collector.AddReferencedObject(Asset);
 	}
 
@@ -139,26 +137,30 @@ public:
 	}
 
 private:
-	TSharedRef<SDockTab> SpawnCodeTab(const FSpawnTabArgs& Args)
+	TSharedRef<SDockTab> SpawnShaderTab(const FSpawnTabArgs& Args)
 	{
-		check(Args.GetTabId() == CodeTabId);
+		check(Args.GetTabId() == ShaderTabId);
 		check(Asset);
 
-		const FText InitialText = FText::FromString(Asset->HlslCode);
-
-		// Marshaller ‚Í TSharedRef ‚Ì‚Ü‚Üg‚¤iTSharedPtr‚É—‚Æ‚·•K—v‚È‚µj
-		TSharedRef<ITextLayoutMarshaller> HighlighterRef = FCodeSyntaxHighlighter::Create();
-
-		SAssignNew(CodeTextBox, SMultiLineEditableTextBox)
-			.Text(InitialText)
+		// Fragment pane
+		TSharedRef<ITextLayoutMarshaller> FragHighlighter = FCodeSyntaxHighlighter::Create();
+		SAssignNew(FragmentTextBox, SMultiLineEditableTextBox)
+			.Text(FText::FromString(Asset->FragmentShaderCode))
 			.Font(FAppStyle::GetFontStyle("MonoFont"))
-			.Marshaller(HighlighterRef)
+			.Marshaller(FragHighlighter)
 			.AlwaysShowScrollbars(true)
 			.AutoWrapText(false)
-			.OnTextChanged(this, &FCodeMaterialAssetEditorToolkit::OnCodeTextChanged);
-		// .ForegroundColor(...) 3‚Â‚Íˆê’UÁ‚·
+			.OnTextChanged(this, &FCodeMaterialAssetEditorToolkit::OnFragmentTextChanged);
 
-		check(CodeTextBox.IsValid());
+		// Vertex pane
+		TSharedRef<ITextLayoutMarshaller> VertHighlighter = FCodeSyntaxHighlighter::Create();
+		SAssignNew(VertexTextBox, SMultiLineEditableTextBox)
+			.Text(FText::FromString(Asset->VertexShaderCode))
+			.Font(FAppStyle::GetFontStyle("MonoFont"))
+			.Marshaller(VertHighlighter)
+			.AlwaysShowScrollbars(true)
+			.AutoWrapText(false)
+			.OnTextChanged(this, &FCodeMaterialAssetEditorToolkit::OnVertexTextChanged);
 
 		return SNew(SDockTab)
 			.TabRole(ETabRole::NomadTab)
@@ -167,7 +169,44 @@ private:
 					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 					.Padding(8.0f)
 					[
-						CodeTextBox.ToSharedRef()
+						SNew(SSplitter)
+						.Orientation(Orient_Horizontal)
+						+ SSplitter::Slot()
+						.Value(0.5f)
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+							[
+								SNew(STextBlock)
+									.Text(LOCTEXT("FragmentLabel", "Fragment Shader"))
+									.Font(FAppStyle::GetFontStyle("BoldFont"))
+							]
+							+ SVerticalBox::Slot()
+							.FillHeight(1.0f)
+							[
+								FragmentTextBox.ToSharedRef()
+							]
+						]
+						+ SSplitter::Slot()
+						.Value(0.5f)
+						[
+							SNew(SVerticalBox)
+							+ SVerticalBox::Slot()
+							.AutoHeight()
+							.Padding(0.0f, 0.0f, 0.0f, 4.0f)
+							[
+								SNew(STextBlock)
+									.Text(LOCTEXT("VertexLabel", "Vertex Shader (optional)"))
+									.Font(FAppStyle::GetFontStyle("BoldFont"))
+							]
+							+ SVerticalBox::Slot()
+							.FillHeight(1.0f)
+							[
+								VertexTextBox.ToSharedRef()
+							]
+						]
 					]
 			];
 	}
@@ -198,9 +237,14 @@ private:
 
 	}
 
-	void OnCodeTextChanged(const FText& NewText)
+	void OnFragmentTextChanged(const FText& NewText)
 	{
-		WorkingText = NewText.ToString();
+		WorkingFragment = NewText.ToString();
+	}
+
+	void OnVertexTextChanged(const FText& NewText)
+	{
+		WorkingVertex = NewText.ToString();
 	}
 
 	bool CanSave() const
@@ -208,81 +252,181 @@ private:
 		return Asset != nullptr;
 	}
 
-	static FString GetDefaultTemplateCode()
+	static FString GetDefaultFragmentCode()
 	{
-		return TEXT(
-			R"(// Minimal template
-float3 MainHLSL(float2 uv)
-{
-	// uv: 0..1
-	return float3(uv.x, uv.y, 0.0);
-}
-)");
+		// Sample: Character outline (cel shader) â€” solid outline color
+		// OutlineColor is declared as a function parameter so the compiler
+		// auto-wires it to the generated VectorParameter node.
+		return
+			TEXT("// Fragment shader â€” Character Outline\n")
+			TEXT("// Entry: float3 FragmentShader(float2 uv, ...) -> EmissiveColor\n")
+			TEXT("//\n")
+			TEXT("// @param float3 OutlineColor = 0.0,0.0,0.0\n")
+			TEXT("\n")
+			TEXT("float3 FragmentShader(float2 uv, float3 OutlineColor)\n")
+			TEXT("{\n")
+			TEXT("    return OutlineColor;\n")
+			TEXT("}\n");
+	}
+
+	static FString GetDefaultVertexCode()
+	{
+		// Sample: Shell extrusion outline
+		// VertexNormal is auto-wired to VertexNormalWS (name contains "Normal").
+		// OutlineWidth is auto-wired to the generated ScalarParameter node.
+		// The compiler sets TwoSided=true, BlendMode=Masked, and wires
+		// TwoSidedSign * -1 to OpacityMask automatically when WPO is active.
+		return
+			TEXT("// Vertex shader â€” Character Outline (Shell Extrusion)\n")
+			TEXT("// Entry: float3 WPO_Main(float3 VertexNormal, ...) -> WorldPositionOffset\n")
+			TEXT("// Leave this pane empty (or all commented out) to disable WPO.\n")
+			TEXT("//\n")
+			TEXT("// @param float OutlineWidth = 0.3\n")
+			TEXT("\n")
+			TEXT("float3 WPO_Main(float3 VertexNormal, float OutlineWidth)\n")
+			TEXT("{\n")
+			TEXT("    return normalize(VertexNormal) * OutlineWidth;\n")
+			TEXT("}\n");
 	}
 
 
-	static bool ValidateCodeForSave(const FString& Code, FString& OutError)
+	// Strip // and /* */ comments for validation purposes
+	static FString StripComments(const FString& Code)
 	{
-		// š ‚±‚±‚ÅéŒ¾iƒXƒR[ƒv‚ğŠÖ”‘S‘Ì‚Éj
-		FString Stripped = Code;
-
-		// 1) empty
-		if (Code.IsEmpty() || IsWhitespaceOnly(Code))
+		FString Out = Code;
+		// Single-line comments
 		{
-			OutError = TEXT("Code is empty.");
+			FRegexPattern Pat(TEXT("//[^\n]*"));
+			FRegexMatcher M(Pat, Out);
+			while (M.FindNext())
+			{
+				const int32 Begin = M.GetMatchBeginning();
+				const int32 End   = M.GetMatchEnding();
+				Out.RemoveAt(Begin, End - Begin);
+				M = FRegexMatcher(Pat, Out);
+			}
+		}
+		// Block comments
+		{
+			FRegexPattern Pat(TEXT("/\\*.*?\\*/"));
+			FRegexMatcher M(Pat, Out);
+			while (M.FindNext())
+			{
+				const int32 Begin = M.GetMatchBeginning();
+				const int32 End   = M.GetMatchEnding();
+				Out.RemoveAt(Begin, End - Begin);
+				M = FRegexMatcher(Pat, Out);
+			}
+		}
+		return Out;
+	}
+
+	// Extract the body of a function whose signature matches HeadPat
+	static bool ExtractFunctionBody(const FString& Stripped, const FRegexPattern& HeadPat, FString& OutBody, FString& OutError)
+	{
+		FRegexMatcher HeadM(HeadPat, Stripped);
+		if (!HeadM.FindNext())
+		{
+			OutError = TEXT("Entry function signature not found.");
 			return false;
 		}
 
-		// 2) ƒRƒƒ“ƒgœ‹i© ‚ ‚È‚½‚ÌŠù‘¶ƒR[ƒh‚ğ‚»‚Ì‚Ü‚Üj
+		const int32 HeadEnd = HeadM.GetMatchEnding();
+		const int32 OpenBracePos = Stripped.Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart, HeadEnd);
+		if (OpenBracePos == INDEX_NONE)
 		{
-			// sƒRƒƒ“ƒg //
-			FRegexPattern Pat(TEXT("//.*?$"));
-			FRegexMatcher M(Pat, Stripped);
-			while (M.FindNext())
-			{
-				const int32 Begin = M.GetMatchBeginning();
-				const int32 End = M.GetMatchEnding();
-				Stripped.RemoveAt(Begin, End - Begin);
-				M = FRegexMatcher(Pat, Stripped);
-			}
+			OutError = TEXT("Function body '{' not found.");
+			return false;
 		}
+
+		int32 Depth = 0;
+		for (int32 i = OpenBracePos; i < Stripped.Len(); ++i)
 		{
-			// ƒuƒƒbƒNƒRƒƒ“ƒg /* */
-			FRegexPattern Pat(TEXT("/\\*.*?\\*/"));
-			FRegexMatcher M(Pat, Stripped);
-			while (M.FindNext())
+			const TCHAR C = Stripped[i];
+			if      (C == '{') { ++Depth; }
+			else if (C == '}')
 			{
-				const int32 Begin = M.GetMatchBeginning();
-				const int32 End = M.GetMatchEnding();
-				Stripped.RemoveAt(Begin, End - Begin);
-				M = FRegexMatcher(Pat, Stripped);
+				--Depth;
+				if (Depth == 0)
+				{
+					OutBody = Stripped.Mid(OpenBracePos + 1, i - OpenBracePos - 1);
+					return true;
+				}
 			}
 		}
 
-		// 3) Entry signature
-		const FRegexPattern EntryPat(
-			TEXT("\\bfloat3\\s+MainHLSL\\s*\\(\\s*float2\\s+[A-Za-z_][A-Za-z0-9_]*")
-		);
+		OutError = TEXT("Function body '}' not found (brace mismatch).");
+		return false;
+	}
+
+	// Validate fragment shader code (required)
+	// Entry: float3 <AnyName>(float2 uv, ...)  -> EmissiveColor
+	static bool ValidateFragmentCode(const FString& Code, FString& OutError)
+	{
+		if (Code.IsEmpty() || IsWhitespaceOnly(Code))
+		{
+			OutError = TEXT("Fragment shader code is empty.");
+			return false;
+		}
+
+		const FString Stripped = StripComments(Code);
+
+		// é–¢æ•°åã¯ä»»æ„ï¼ˆæœ€åˆã®å¼•æ•°ãŒ float2 ã§ã‚ã‚‹ã“ã¨ã ã‘ã‚’è¦æ±‚ï¼‰
+		const FRegexPattern EntryPat(TEXT("\\bfloat3\\s+\\w+\\s*\\(\\s*float2\\s+[A-Za-z_][A-Za-z0-9_]*"));
 		FRegexMatcher EntryM(EntryPat, Stripped);
 		if (!EntryM.FindNext())
 		{
-			OutError = TEXT("Entry signature must be: float3 MainHLSL(float2 uv, ...");
+			OutError = TEXT("Entry signature must be: float3 <FuncName>(float2 uv, ...)");
 			return false;
 		}
 
-		// 4) Main body ’Šo
-		FString MainBody;
-		FString MainErr;
-		if (!ExtractMainBody(Stripped, MainBody, MainErr))
+		FString Body, BodyErr;
+		if (!ExtractFunctionBody(Stripped, EntryPat, Body, BodyErr))
 		{
-			OutError = MainErr;
+			OutError = BodyErr;
 			return false;
 		}
 
-		// 5) return ƒ`ƒFƒbƒN
-		if (!MainBody.Contains(TEXT("return")))
+		if (!Body.Contains(TEXT("return")))
 		{
-			OutError = TEXT("MainHLSL must contain a return statement.");
+			OutError = TEXT("Fragment shader must contain a return statement.");
+			return false;
+		}
+
+		return true;
+	}
+
+	// Validate vertex shader code (optional)
+	// Entry: float3 <AnyName>(float3 VertexNormal, ...)  -> WorldPositionOffset
+	// Returns true if all active code is commented out (treated as disabled)
+	static bool ValidateVertexCode(const FString& Code, FString& OutError)
+	{
+		const FString Stripped = StripComments(Code);
+
+		if (IsWhitespaceOnly(Stripped))
+		{
+			return true; // All commented out â€” WPO disabled
+		}
+
+		// é–¢æ•°åã¯ä»»æ„ï¼ˆVertexShader ã¯ FXC äºˆç´„èªãªã®ã§ WPO_Main ç­‰ã‚‚è¨±å¯ï¼‰
+		const FRegexPattern EntryPat(TEXT("\\bfloat3\\s+\\w+\\s*\\(\\s*float3\\s+[A-Za-z_][A-Za-z0-9_]*"));
+		FRegexMatcher EntryM(EntryPat, Stripped);
+		if (!EntryM.FindNext())
+		{
+			OutError = TEXT("Vertex entry signature must be: float3 <FuncName>(float3 VertexNormal, ...)");
+			return false;
+		}
+
+		FString Body, BodyErr;
+		if (!ExtractFunctionBody(Stripped, EntryPat, Body, BodyErr))
+		{
+			OutError = BodyErr;
+			return false;
+		}
+
+		if (!Body.Contains(TEXT("return")))
+		{
+			OutError = TEXT("Vertex shader must contain a return statement.");
 			return false;
 		}
 
@@ -290,72 +434,23 @@ float3 MainHLSL(float2 uv)
 	}
 
 
-	static bool ExtractMainBody(const FString& Stripped, FString& OutBody, FString& OutError)
-	{
-		// Main( ... ) ‚ÌŒã‚ë‚Ì '{' ‚ğ’T‚·
-		const FRegexPattern MainHeadPat(TEXT("\\bfloat3\\s+MainHLSL\\s*\\(\\s*float2\\s+[A-Za-z_][A-Za-z0-9_]*"));
-		FRegexMatcher HeadM(MainHeadPat, Stripped);
-		if (!HeadM.FindNext())
-		{
-			OutError = TEXT("Entry signature must be: float3 MainHLSL(float2 uv, ...");
-			return false;
-		}
-
-		const int32 HeadEnd = HeadM.GetMatchEnding();
-
-		// '{' ‚ğ’T‚·iMainHLSLéŒ¾‚ÌŒãj
-		const int32 OpenBracePos = Stripped.Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart, HeadEnd);
-		if (OpenBracePos == INDEX_NONE)
-		{
-			OutError = TEXT("MainHLSL body '{' not found.");
-			return false;
-		}
-
-		// ‘Î‰‚·‚é '}' ‚ğƒlƒXƒg‚İ‚Å’T‚·
-		int32 Depth = 0;
-		for (int32 i = OpenBracePos; i < Stripped.Len(); ++i)
-		{
-			const TCHAR C = Stripped[i];
-			if (C == '{') Depth++;
-			else if (C == '}')
-			{
-				Depth--;
-				if (Depth == 0)
-				{
-					// '{' ‚Æ '}' ‚Ì’†g
-					const int32 BodyBegin = OpenBracePos + 1;
-					const int32 BodyLen = i - BodyBegin;
-					OutBody = Stripped.Mid(BodyBegin, BodyLen);
-					return true;
-				}
-			}
-		}
-
-		OutError = TEXT("MainHLSL body '}' not found (brace mismatch inside MainHLSL).");
-		return false;
-	}
-
-
 	static FString NormalizeCodeForSave(const FString& In)
 	{
-		// 1) ‰üsƒR[ƒh“ˆêiCRLF / CR ¨ LFj
+		// Normalize line endings to \n
 		FString Out = In;
 		Out.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
-		Out.ReplaceInline(TEXT("\r"), TEXT("\n"));
+		Out.ReplaceInline(TEXT("\r"),   TEXT("\n"));
 
-		// 2) s‚²‚Æ‚É––”ö‹ó”’‚ğí‚é
+		// Trim trailing whitespace from each line
 		TArray<FString> Lines;
 		Out.ParseIntoArray(Lines, TEXT("\n"), false);
-
 		for (FString& Line : Lines)
 		{
 			Line = Line.TrimEnd();
 		}
 
-		// 3) ÄŒ‹‡
+		// Rejoin and ensure single trailing newline
 		Out = FString::Join(Lines, TEXT("\n"));
-
-		// 4) ƒtƒ@ƒCƒ‹––”ö‚É•K‚¸‰üs‚ğ 1 ‚Â‚¾‚¯•t‚¯‚é
 		while (Out.EndsWith(TEXT("\n")))
 		{
 			Out.LeftChopInline(1);
@@ -369,14 +464,14 @@ float3 MainHLSL(float2 uv)
 
 	bool CanReset() const
 	{
-		return true; // í‚É‰Ÿ‚¹‚ÄOK
+		return true;
 	}
 
 	void OnClickedReset()
 	{
 		const EAppReturnType::Type Ret = FMessageDialog::Open(
 			EAppMsgType::YesNo,
-			LOCTEXT("ResetConfirm", "Reset the text to the default template?\n\n(Unsaved edits in the editor will be lost.)")
+			LOCTEXT("ResetConfirm", "Reset both shaders to the default templates?\n\n(Unsaved edits in the editor will be lost.)")
 		);
 
 		if (Ret != EAppReturnType::Yes)
@@ -384,14 +479,14 @@ float3 MainHLSL(float2 uv)
 			return;
 		}
 
-		const FString Template = GetDefaultTemplateCode();
+		const FString FragTemplate = GetDefaultFragmentCode();
+		const FString VertTemplate = GetDefaultVertexCode();
 
-		WorkingText = Template;
+		WorkingFragment = FragTemplate;
+		WorkingVertex   = VertTemplate;
 
-		if (CodeTextBox.IsValid())
-		{
-			CodeTextBox->SetText(FText::FromString(Template));
-		}
+		if (FragmentTextBox.IsValid()) { FragmentTextBox->SetText(FText::FromString(FragTemplate)); }
+		if (VertexTextBox.IsValid())   { VertexTextBox->SetText(FText::FromString(VertTemplate));   }
 	}
 
 
@@ -403,62 +498,69 @@ float3 MainHLSL(float2 uv)
 
 		if (!Asset) return;
 
-		FString NewCode = CodeTextBox.IsValid()
-			? CodeTextBox->GetText().ToString()
-			: WorkingText;
+		FString NewFragment = FragmentTextBox.IsValid()
+			? FragmentTextBox->GetText().ToString()
+			: WorkingFragment;
+		FString NewVertex = VertexTextBox.IsValid()
+			? VertexTextBox->GetText().ToString()
+			: WorkingVertex;
 
-		NewCode = NormalizeCodeForSave(NewCode);
+		NewFragment = NormalizeCodeForSave(NewFragment);
+		NewVertex   = NormalizeCodeForSave(NewVertex);
 
+		// Validate fragment (required)
 		FString Error;
-		if (!ValidateCodeForSave(NewCode, Error))
+		if (!ValidateFragmentCode(NewFragment, Error))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] Save blocked: %s"), *Error);
-			FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Save blocked.\n\n%s"), *Error)));
+			UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] Fragment save blocked: %s"), *Error);
+			FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Fragment save blocked.\n\n%s"), *Error)));
 			return;
 		}
 
-		const bool bCodeChanged = (Asset->HlslCode != NewCode);
+		// Validate vertex (optional â€” skip if all whitespace after normalization)
+		if (!IsWhitespaceOnly(NewVertex))
+		{
+			if (!ValidateVertexCode(NewVertex, Error))
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] Vertex save blocked: %s"), *Error);
+				FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Vertex save blocked.\n\n%s"), *Error)));
+				return;
+			}
+		}
 
-		if (bCodeChanged)
+		const bool bFragChanged = (Asset->FragmentShaderCode != NewFragment);
+		const bool bVertChanged = (Asset->VertexShaderCode   != NewVertex);
+
+		if (bFragChanged || bVertChanged)
 		{
 			Asset->Modify();
-			Asset->HlslCode = NewCode;
+			Asset->FragmentShaderCode = NewFragment;
+			Asset->VertexShaderCode   = NewVertex;
 
 			if (UPackage* Pkg = Asset->GetOutermost())
 			{
 				Pkg->SetDirtyFlag(true);
-				UE_LOG(LogTemp, Log, TEXT("[CodeMaterialAsset] Saved."));
 			}
 		}
 
-		// š‚±‚±‚ªd—vFƒR[ƒh‚ª•Ï‚í‚Á‚Ä‚È‚­‚Ä‚àAOutputMaterial ‚ª–³‚¯‚ê‚Î¶¬‚·‚é
-		//const bool bNeedCompile = bCodeChanged || (Asset->OutputMaterial == nullptr);
-		//ˆê”ÔG‚ÅŠmÀ‚È‚Ì‚Í‚±‚êF
-		const bool bNeedCompile = true;
+		// Always compile
+		UMaterial* Mat = nullptr;
+		FString Err;
 
-		if (bNeedCompile)
+		UE_LOG(LogTemp, Warning, TEXT("Compile start: FragChanged=%d VertChanged=%d OutputMaterial=%s"),
+			bFragChanged ? 1 : 0, bVertChanged ? 1 : 0, *GetNameSafe(Asset->OutputMaterial));
+
+		if (CodeMat::CompileCodeAssetToMaterial(Asset, Mat, Err) && Mat)
 		{
-			UMaterial* Mat = nullptr;
-			FString Err;
-
-			UE_LOG(LogTemp, Warning, TEXT("Compile start: bCodeChanged=%d OutputMaterial=%s"),
-				bCodeChanged ? 1 : 0, *GetNameSafe(Asset->OutputMaterial));
-
-			if (CodeMat::CompileCodeAssetToMaterial(Asset, Mat, Err) && Mat)
-			{
-				UEditorAssetLibrary::SaveLoadedAsset(Mat, /*bOnlyIfIsDirty*/ false);
-				UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false);
-				UE_LOG(LogTemp, Warning, TEXT("Compile OK -> Saved Mat=%s Path=%s"),
-					*GetNameSafe(Mat), *Mat->GetPathName());
-			}
-			else
-			{
-				UE_LOG(LogTemp, Warning, TEXT("Compile failed: %s"), *Err);
-			}
+			UEditorAssetLibrary::SaveLoadedAsset(Mat,   /*bOnlyIfIsDirty*/ false);
+			UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false);
+			UE_LOG(LogTemp, Log, TEXT("[CodeMaterialAsset] Compile OK -> %s (%s)"),
+				*GetNameSafe(Mat), *Mat->GetPathName());
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("Skip compile: no changes and OutputMaterial exists."));
+			UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] Compile failed: %s"), *Err);
+			FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Compile failed.\n\n%s"), *Err)));
 		}
 	}
 
@@ -484,12 +586,14 @@ float3 MainHLSL(float2 uv)
 private:
 	TObjectPtr<UCodeMaterialAsset> Asset = nullptr;
 
-	TSharedPtr<SMultiLineEditableTextBox> CodeTextBox;
-	FString WorkingText;
+	TSharedPtr<SMultiLineEditableTextBox> FragmentTextBox;
+	TSharedPtr<SMultiLineEditableTextBox> VertexTextBox;
+	FString WorkingFragment;
+	FString WorkingVertex;
 };
 
 // ============================================================================
-// FCodeMaterialAssetEditor (ŠO‘¤ƒ‰ƒbƒp)
+// FCodeMaterialAssetEditor
 // ============================================================================
 
 void FCodeMaterialAssetEditor::InitCodeMaterialAssetEditor(

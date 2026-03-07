@@ -26,12 +26,14 @@
 #include "Internationalization/Regex.h"
 
 // ============================================================================
-// WriteUserUshFile
+// WriteShaderFile
+// ファイル名: CodeMat_<AssetName>.ush (Fragment + Vertex を 1 ファイルに統合)
 // ============================================================================
 
-static bool WriteUserUshFile(
+static bool WriteShaderFile(
     const UCodeMaterialAsset* Asset,
-    const FString& UserCode,
+    const FString& FragCode,
+    const FString& VertCode,
     FString& OutVirtualIncludePath,
     FString& OutErr)
 {
@@ -46,9 +48,15 @@ static bool WriteUserUshFile(
     const FString DiskPath = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Shaders/Private"), FileName);
     OutVirtualIncludePath  = FString::Printf(TEXT("/Plugin/furcraeaHLSLEditor/Private/%s"), *FileName);
 
-    FString TextToWrite = UserCode;
-    if (!TextToWrite.Contains(TEXT("#pragma once")))
-        TextToWrite = TEXT("#pragma once\n\n") + TextToWrite;
+    // Fragment + Vertex を 1 ファイルに統合
+    FString TextToWrite = TEXT("#pragma once\n\n");
+    TextToWrite += TEXT("// ===== Fragment Shader =====\n");
+    TextToWrite += FragCode;
+    if (!VertCode.TrimStartAndEnd().IsEmpty())
+    {
+        TextToWrite += TEXT("\n\n// ===== Vertex Shader =====\n");
+        TextToWrite += VertCode;
+    }
 
     TextToWrite.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
     TextToWrite.ReplaceInline(TEXT("\r"),   TEXT("\n"));
@@ -115,6 +123,95 @@ static UMaterial* CreateOrLoadMaterial(UCodeMaterialAsset* Asset)
     Asset->MarkPackageDirty();
 
     return Mat;
+}
+
+// ============================================================================
+// ============================================================================
+// ユーザーの HLSL コードから関数ボディを抽出する
+//
+// 例: "float3 WPO_Main(float3 N, float W) { return N * W; }"
+//     → "return N * W; "
+//
+// Custom expression の Code フィールドは生成ラッパー関数の内部に展開されるため、
+// インクルードファイルを使わず関数ボディを直接 Code に埋め込む方式を採用。
+// これにより ShaderCompileWorker が Plugin の仮想インクルードパスを
+// 解決できない問題（UE5.7 クラッシュの根本原因）を回避する。
+// ============================================================================
+
+static FString ExtractShaderFunctionBody(const FString& Code, const FString& FuncName)
+{
+    // FuncName の開き波括弧を探す
+    const FString Pattern = FString::Printf(TEXT("\\b%s\\b[^{]*\\{"), *FuncName);
+    FRegexMatcher M(FRegexPattern(*Pattern), Code);
+    if (!M.FindNext()) return FString();
+
+    int32 OpenIdx = M.GetMatchEnding() - 1; // '{' の位置
+
+    // ネスト対応で対応する '}' を探す
+    int32 Depth = 1;
+    int32 Pos   = OpenIdx + 1;
+    while (Pos < Code.Len() && Depth > 0)
+    {
+        TCHAR Ch = Code[Pos];
+        if      (Ch == TEXT('{')) ++Depth;
+        else if (Ch == TEXT('}')) --Depth;
+        if (Depth > 0) ++Pos;
+    }
+    if (Depth != 0) return FString(); // 対応する } が見つからない
+
+    // 波括弧の内側を返す
+    return Code.Mid(OpenIdx + 1, Pos - OpenIdx - 1);
+}
+
+// HLSL 予約語の関数名を安全な名前にリネームする
+//
+// FXC / DXC では VertexShader・PixelShader 等の Effects キーワードが
+// 関数名として使われると "error: unexpected token" でコンパイル失敗する。
+// これが FinalizeShaderCode() 未呼出し → OptionalDataSize == -1 クラッシュの原因。
+// ============================================================================
+
+static FString SafeifyHLSL(const FString& Code)
+{
+    static const TArray<TPair<FString, FString>> Renames = {
+        { TEXT("VertexShader"),   TEXT("WPO_Main")    },
+        { TEXT("PixelShader"),    TEXT("PS_Main")     },
+        { TEXT("GeometryShader"), TEXT("GS_Main")     },
+        { TEXT("HullShader"),     TEXT("HS_Main")     },
+        { TEXT("DomainShader"),   TEXT("DS_Main")     },
+        { TEXT("ComputeShader"),  TEXT("CS_Main")     },
+    };
+    FString Result = Code;
+    for (const auto& KV : Renames)
+        Result.ReplaceInline(*KV.Key, *KV.Value, ESearchCase::CaseSensitive);
+    return Result;
+}
+
+// コメント行を除去する（// ... 形式）
+// DetectFunctionName/ExtractFuncParams がコメント内の仮シグネチャにマッチするのを防ぐ
+static FString StripLineComments(const FString& Code)
+{
+    const FRegexPattern Pat(TEXT("//[^\n]*"));
+    FString Out;
+    int32 LastEnd = 0;
+    FRegexMatcher M(Pat, Code);
+    while (M.FindNext())
+    {
+        Out += Code.Mid(LastEnd, M.GetMatchBeginning() - LastEnd);
+        LastEnd = M.GetMatchEnding();
+    }
+    Out += Code.Mid(LastEnd);
+    return Out;
+}
+
+// HLSL ソース内の最初の float3 関数定義の関数名を返す（コメント内は除外）
+static FString DetectFunctionName(const FString& Code)
+{
+    const FString Stripped = StripLineComments(Code);
+    const FRegexPattern Pat(TEXT("float3\\s+(\\w+)\\s*\\("));
+    FRegexMatcher M(Pat, Stripped);
+    if (M.FindNext())
+        return M.GetCaptureGroup(1).TrimStartAndEnd();
+    return FString();
 }
 
 // ============================================================================
@@ -185,11 +282,14 @@ static TArray<FCodeMatParam> ParseCodeMatParams(const FString& Code)
 // Extract typed parameter list from a function signature.
 // e.g. "float3 MainHLSL(float2 uv, float3 OutlineColor)"
 //   -> [("float2","uv"), ("float3","OutlineColor")]
+// コメント内のシグネチャ(e.g. "// Entry: float3 Foo(float2 uv, ...)")にマッチしないよう
+// コメントを除去してから検索する。
 static TArray<TPair<FString, FString>> ExtractFuncParams(const FString& Code, const FString& FuncName)
 {
     TArray<TPair<FString, FString>> Result;
+    const FString Stripped = StripLineComments(Code);
     const FString Pattern = FString::Printf(TEXT("\\b%s\\s*\\(([^)]*)\\)"), *FuncName);
-    FRegexMatcher M(FRegexPattern(*Pattern), Code);
+    FRegexMatcher M(FRegexPattern(*Pattern), Stripped);
     if (!M.FindNext()) return Result;
 
     const FString ParamList = M.GetCaptureGroup(1).TrimStartAndEnd();
@@ -214,15 +314,47 @@ static TArray<TPair<FString, FString>> ExtractFuncParams(const FString& Code, co
 
 static void BuildMaterialGraph(
     UMaterial*     Material,
-    const FString& VirtualIncludePath,
-    const FString& HlslCode)
+    const FString& FragmentCode,
+    const FString& VertexCode)
 {
     if (!Material) return;
 
-    UMaterialEditingLibrary::DeleteAllMaterialExpressions(Material);
+    // 既存のコンパイルを全部終わらせてから変更する
+    if (GShaderCompilingManager && GShaderCompilingManager->IsCompiling())
+        GShaderCompilingManager->FinishAllCompilation();
 
-    // --- Create @param expressions ---
-    const TArray<FCodeMatParam> Params = ParseCodeMatParams(HlslCode);
+    Material->PreEditChange(nullptr);
+
+    // ---- Expression を直接操作してクリア（UMaterialEditingLibrary 不使用） ----
+    // UMaterialEditingLibrary::CreateMaterialExpression / DeleteAllMaterialExpressions は
+    // 内部で Material->PostEditChange() を毎回呼ぶため、中途半端なグラフ状態で
+    // 何度もシェーダーコンパイルが走り FShaderPipelineCompileJob が失敗、
+    // FinalizeShaderCode 未呼び出し → OptionalDataSize == -1 アサートが発生する。
+    // NewObject で直接生成し PostEditChange は末尾の1回だけにする。
+    UMaterialEditorOnlyData* ED = Material->GetEditorOnlyData();
+    ED->ExpressionCollection.Empty();
+
+    // マテリアルピン接続をリセット
+    ED->EmissiveColor.Expression       = nullptr;
+    ED->WorldPositionOffset.Expression = nullptr;
+    ED->OpacityMask.Expression         = nullptr;
+
+    // Expression を生成して ExpressionCollection に登録するヘルパー
+    auto NewExpr = [&](UClass* ExprClass) -> UMaterialExpression*
+    {
+        UMaterialExpression* E = NewObject<UMaterialExpression>(
+            Material, ExprClass, NAME_None, RF_Transactional);
+        if (E)
+        {
+            E->Material = Material;  // CreateMaterialExpressionEx と同じバックリファレンス設定
+            ED->ExpressionCollection.AddExpression(E);
+        }
+        return E;
+    };
+
+    // ---- @param expressions ----
+    const FString CombinedCode = FragmentCode + TEXT("\n\n") + VertexCode;
+    const TArray<FCodeMatParam> Params = ParseCodeMatParams(CombinedCode);
     TMap<FString, UMaterialExpression*> ParamExprMap;
     {
         int32 Y = 0;
@@ -232,15 +364,13 @@ static void BuildMaterialGraph(
             if (P.Type == FCodeMatParam::EType::Scalar)
             {
                 auto* E = Cast<UMaterialExpressionScalarParameter>(
-                    UMaterialEditingLibrary::CreateMaterialExpression(
-                        Material, UMaterialExpressionScalarParameter::StaticClass()));
+                    NewExpr(UMaterialExpressionScalarParameter::StaticClass()));
                 if (E) { E->ParameterName = FName(*P.Name); E->DefaultValue = P.DefaultScalar; Expr = E; }
             }
             else
             {
                 auto* E = Cast<UMaterialExpressionVectorParameter>(
-                    UMaterialEditingLibrary::CreateMaterialExpression(
-                        Material, UMaterialExpressionVectorParameter::StaticClass()));
+                    NewExpr(UMaterialExpressionVectorParameter::StaticClass()));
                 if (E) { E->ParameterName = FName(*P.Name); E->DefaultValue = P.DefaultColor; Expr = E; }
             }
             if (Expr)
@@ -253,25 +383,22 @@ static void BuildMaterialGraph(
         }
     }
 
-    // --- Standard source expressions ---
+    // ---- Standard source expressions ----
     auto* TexCoord = Cast<UMaterialExpressionTextureCoordinate>(
-        UMaterialEditingLibrary::CreateMaterialExpression(
-            Material, UMaterialExpressionTextureCoordinate::StaticClass()));
+        NewExpr(UMaterialExpressionTextureCoordinate::StaticClass()));
     if (TexCoord)
     {
-        TexCoord->CoordinateIndex          = 0;
+        TexCoord->CoordinateIndex           = 0;
         TexCoord->MaterialExpressionEditorX = -400;
         TexCoord->MaterialExpressionEditorY =    0;
     }
 
-    // VertexNormalWS は MainWPO がある場合のみ生成する
-    const bool bHasWPO = HlslCode.Contains(TEXT("MainWPO"));
+    const bool bHasWPO = !VertexCode.TrimStartAndEnd().IsEmpty();
     UMaterialExpressionVertexNormalWS* VertNormal = nullptr;
     if (bHasWPO)
     {
         VertNormal = Cast<UMaterialExpressionVertexNormalWS>(
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material, UMaterialExpressionVertexNormalWS::StaticClass()));
+            NewExpr(UMaterialExpressionVertexNormalWS::StaticClass()));
         if (VertNormal)
         {
             VertNormal->MaterialExpressionEditorX = -400;
@@ -279,14 +406,12 @@ static void BuildMaterialGraph(
         }
     }
 
-    // --- Helper: resolve a function parameter to a material expression input ---
+    // ---- 関数引数 → Expression 入力 の解決 ----
     auto ResolveInput = [&](const FString& TypeStr, const FString& PName, FExpressionInput& Out)
     {
-        // @param match (case-sensitive name)
         if (UMaterialExpression** Found = ParamExprMap.Find(PName))
         {
             Out.Expression = *Found;
-            // float3 VectorParameter outputs float4; mask to .rgb
             const FCodeMatParam* P = Params.FindByPredicate(
                 [&](const FCodeMatParam& X){ return X.Name == PName; });
             if (P && P->Type == FCodeMatParam::EType::Vector3)
@@ -295,75 +420,97 @@ static void BuildMaterialGraph(
             }
             return;
         }
-        // uv / UV -> TexCoord
         if (PName.Equals(TEXT("uv"), ESearchCase::IgnoreCase) && TexCoord)
         {
             Out.Expression = TexCoord;
             return;
         }
-        // *Normal* -> VertexNormalWS
         if ((PName.Contains(TEXT("Normal")) || PName.Contains(TEXT("normal"))) && VertNormal)
         {
             Out.Expression = VertNormal;
             return;
         }
-        // unresolved: leave null (Custom node treats it as 0)
     };
 
-    // --- Helper: build a Custom node for one entry function ---
-    auto BuildCustomNode = [&](const FString& FuncName, EMaterialProperty TargetProp,
-                               ECustomMaterialOutputType OutType, int32 NodeY)
+    // ---- Custom ノードを生成して返すヘルパー（PostEditChange なし） ----
+    // 注: ShaderCompileWorker がプロジェクトプラグインの仮想インクルードパスを
+    //     解決できないため IncludeFilePaths を使わず関数ボディを直接 Code に埋め込む。
+    //     CodeMat_<Name>.ush はユーザー編集用に書き出すが、コンパイルには使わない。
+    auto BuildCustomNode = [&](const FString& FuncName,
+                               const FString& SourceCode,
+                               ECustomMaterialOutputType OutType,
+                               int32 NodeY) -> UMaterialExpressionCustom*
     {
-        // Only build if function appears in source
-        if (!HlslCode.Contains(FuncName)) return;
+        if (SourceCode.IsEmpty()) return nullptr;
 
         auto* Custom = Cast<UMaterialExpressionCustom>(
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material, UMaterialExpressionCustom::StaticClass()));
-        if (!Custom) return;
+            NewExpr(UMaterialExpressionCustom::StaticClass()));
+        if (!Custom) return nullptr;
 
         Custom->OutputType                = OutType;
         Custom->MaterialExpressionEditorX =    0;
         Custom->MaterialExpressionEditorY = NodeY;
+        // ShaderCompileWorker はプロジェクトプラグインの仮想インクルードパスを
+        // 解決できないため IncludeFilePaths は使用しない。
+        // 関数ボディを Custom->Code に直接埋め込むことでインクルードを回避する。
         Custom->IncludeFilePaths.Reset();
-        Custom->IncludeFilePaths.Add(VirtualIncludePath);
         Custom->Inputs.Reset();
 
-        const TArray<TPair<FString, FString>> FuncParams = ExtractFuncParams(HlslCode, FuncName);
-        TArray<FString> ArgNames;
+        const TArray<TPair<FString, FString>> FuncParams = ExtractFuncParams(SourceCode, FuncName);
         for (const TPair<FString, FString>& Fp : FuncParams)
         {
-            ArgNames.Add(Fp.Value);
             FCustomInput& In = Custom->Inputs.AddDefaulted_GetRef();
             In.InputName     = FName(*Fp.Value);
             ResolveInput(Fp.Key, Fp.Value, In.Input);
         }
 
-        const FString ArgList = FString::Join(ArgNames, TEXT(", "));
-        Custom->Code = FString::Printf(TEXT("return %s(%s);\n"), *FuncName, *ArgList);
-
-        UMaterialEditingLibrary::ConnectMaterialProperty(Custom, TEXT(""), TargetProp);
+        // 関数ボディを抽出して直接埋め込む。
+        // Custom->Code は UE が生成するラッパー関数の内部として展開されるため、
+        // 入力ピン名がそのままローカル変数名として使える。
+        const FString FuncBody = ExtractShaderFunctionBody(SourceCode, FuncName);
+        Custom->Code = !FuncBody.IsEmpty()
+            ? FuncBody
+            : FString::Printf(TEXT("// ERROR: could not extract body of '%s'\nreturn 0;\n"), *FuncName);
+        return Custom;
     };
 
-    // Build vertex (WPO) node first, then pixel node
-    BuildCustomNode(TEXT("MainWPO"),  MP_WorldPositionOffset, CMOT_Float3, -200);
-    BuildCustomNode(TEXT("MainHLSL"), MP_EmissiveColor,       CMOT_Float3,    0);
+    // ---- ノードを生成してマテリアルピンに直接接続 ----
+    // SafeifyHLSL 済みのコードから関数名を動的検出（ハードコードしない）
+    if (bHasWPO)
+    {
+        const FString WPOFuncName = DetectFunctionName(VertexCode);
+        if (!WPOFuncName.IsEmpty())
+        {
+            auto* WPOCustom = BuildCustomNode(
+                WPOFuncName, VertexCode, CMOT_Float3, -200);
+            if (WPOCustom)
+            {
+                ED->WorldPositionOffset.Expression  = WPOCustom;
+                ED->WorldPositionOffset.OutputIndex = 0;
+            }
+        }
+    }
+
+    const FString FragFuncName = DetectFunctionName(FragmentCode);
+    auto* FragCustom = !FragFuncName.IsEmpty()
+        ? BuildCustomNode(FragFuncName, FragmentCode, CMOT_Float3, 0)
+        : nullptr;
+    if (FragCustom)
+    {
+        ED->EmissiveColor.Expression   = FragCustom;
+        ED->EmissiveColor.OutputIndex  = 0;
+    }
 
     if (bHasWPO)
     {
         // アウトライン（シェル法）: バック面だけを描画する
-        // TwoSidedSign は フロント面=1, バック面=-1 を返す
-        // -1 を掛けると フロント面=-1(破棄), バック面=1(描画) になり
-        // BLEND_Masked のデフォルト閾値(0.333)でフロント面が自動的に破棄される
-        Material->TwoSided      = 1;
-        Material->BlendMode     = BLEND_Masked;
+        Material->TwoSided  = 1;
+        Material->BlendMode = BLEND_Masked;
 
         auto* TwoSidedSign = Cast<UMaterialExpressionTwoSidedSign>(
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material, UMaterialExpressionTwoSidedSign::StaticClass()));
+            NewExpr(UMaterialExpressionTwoSidedSign::StaticClass()));
         auto* Negate = Cast<UMaterialExpressionMultiply>(
-            UMaterialEditingLibrary::CreateMaterialExpression(
-                Material, UMaterialExpressionMultiply::StaticClass()));
+            NewExpr(UMaterialExpressionMultiply::StaticClass()));
 
         if (TwoSidedSign && Negate)
         {
@@ -373,18 +520,19 @@ static void BuildMaterialGraph(
             Negate->ConstB                          = -1.f;
             Negate->MaterialExpressionEditorX       = 200;
             Negate->MaterialExpressionEditorY       = 250;
-            UMaterialEditingLibrary::ConnectMaterialProperty(Negate, TEXT(""), MP_OpacityMask);
+            ED->OpacityMask.Expression        = Negate;
+            ED->OpacityMask.OutputIndex       = 0;
         }
     }
     else
     {
-        Material->TwoSided    = 0;
-        Material->BlendMode   = BLEND_Opaque;
+        Material->TwoSided  = 0;
+        Material->BlendMode = BLEND_Opaque;
     }
 
     Material->SetShadingModel(MSM_Unlit);
 
-    Material->PreEditChange(nullptr);
+    // PostEditChange は必ずここの1回だけ — これが唯一のシェーダーコンパイルトリガー
     Material->PostEditChange();
     Material->MarkPackageDirty();
 }
@@ -407,15 +555,41 @@ bool CodeMat::CompileCodeAssetToMaterial(
     if (!Mat) { OutError = TEXT("Failed to create/load material"); return false; }
 
 #if WITH_EDITOR
-    FString VirtualIncludePath;
-    if (!WriteUserUshFile(Asset, Asset->HlslCode, VirtualIncludePath, OutError))
+    // Wait for any in-flight shader compilation to finish before writing new
+    // shader files. Writing .ush files while the compile thread holds shader
+    // code objects causes the OptionalDataSize == -1 assertion in
+    // FShaderCode::GetFinalizedResource (ShaderCore.h:1414).
+    if (GShaderCompilingManager && GShaderCompilingManager->IsCompiling())
+    {
+        GShaderCompilingManager->FinishAllCompilation();
+    }
+
+    // HLSL 予約語の関数名（VertexShader 等）をコンパイル前に安全な名前へ置換する。
+    // FXC が VertexShader を予約キーワードとして扱いコンパイル失敗させるのが
+    // OptionalDataSize == -1 クラッシュの根本原因。
+    // ユーザーの Asset プロパティは書き換えず、書き出す .ush / グラフ構築にのみ適用する。
+    const FString SafeFragCode = SafeifyHLSL(Asset->FragmentShaderCode);
+    const FString SafeVertCode = SafeifyHLSL(Asset->VertexShaderCode);
+
+    // Fragment + Vertex を 1 ファイル CodeMat_<Name>.ush に書き出す
+    FString CombinedVirtualPath;
+    if (!WriteShaderFile(Asset, SafeFragCode, SafeVertCode, CombinedVirtualPath, OutError))
         return false;
-    // FlushShaderFileCache() は呼ばない。
-    // シェーダーコンパイルスレッドとの競合で OptionalDataSize == -1 アサートが起きるため。
-    // .ush はアセットごとに固有のファイル名なので、初回コンパイル時に必ずディスクから読まれる。
+
+    // インメモリのシェーダーソースファイルキャッシュをクリアする。
+    FlushShaderFileCache();
 #endif
 
-    BuildMaterialGraph(Mat, VirtualIncludePath, Asset->HlslCode);
+    BuildMaterialGraph(Mat, SafeFragCode, SafeVertCode);
+
+#if WITH_EDITOR
+    // PostEditChange がキックしたシェーダーコンパイルが完全に終わるまで待機する。
+    // 完了前に SaveLoadedAsset を呼ぶと、サムネイル生成がまだ FinalizeShaderCode()
+    // されていないシェーダーに対して GetFinalizedCodeResource() を呼び、
+    // check(OptionalDataSize == -1) クラッシュ (UE5.7 エンジンバグ) が発生する。
+    if (GShaderCompilingManager && GShaderCompilingManager->IsCompiling())
+        GShaderCompilingManager->FinishAllCompilation();
+#endif
 
     UEditorAssetLibrary::SaveLoadedAsset(Mat, /*bOnlyIfIsDirty*/ false);
 
