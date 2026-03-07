@@ -3,12 +3,17 @@
 
 
 導入方法
+
 ０，以下のリンクをダウンロード
+furcraeaHLSLEditor_UE5.7.3V4.zip
+https://drive.google.com/file/d/1XhVZgV6FRiyGOOquqO5nJVFXbmg_8DA-/view?usp=sharing
 
 furcraeaHLSLEditor_UE5.7.3V3.zip
 https://drive.google.com/file/d/1Qmz5Y_uT0VGKkrk1wskvw2DRbnND6or4/view?usp=drive_link
+
 furcraeaHLSLEditor_UE5.7.3V2.zip
 https://drive.google.com/file/d/1CSXmSebk7hLM02qM5jKDv2ndNJ4jhUi7/view?usp=sharing
+
 
 １，Pluginsフォルダにzipを解凍して入れてください。
 
