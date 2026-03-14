@@ -13,6 +13,7 @@
 #include "Materials/MaterialExpressionVertexNormalWS.h"
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Materials/MaterialExpressionObjectRadius.h"
+#include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionTwoSidedSign.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "MaterialEditingLibrary.h"
@@ -203,6 +204,19 @@ static FString StripLineComments(const FString& Code)
     }
     Out += Code.Mid(LastEnd);
     return Out;
+}
+
+// HLSL ビルトイン変数の自動注入: Custom Expression のボディ内で Time を裸で使用してもコンパイルエラーにならないように View.GameTime を注入する。
+static FString InjectHLSLBuiltins(const FString& Body)
+{
+    FString Prefix;
+    // Time: ボディ内で使用されているが float 宣言もパラメータもない場合、View.GameTime を注入
+    if (FRegexMatcher(FRegexPattern(TEXT("\\bTime\\b")), Body).FindNext() &&
+        !FRegexMatcher(FRegexPattern(TEXT("\\bfloat\\s+Time\\b")), Body).FindNext())
+    {
+        Prefix += TEXT("float Time = View.GameTime;\n");
+    }
+    return Prefix.IsEmpty() ? Body : (Prefix + Body);
 }
 
 // HLSL ソース内の最初の float3 関数定義の関数名を返す（コメント内は除外）
@@ -432,6 +446,15 @@ static void BuildMaterialGraph(
         ObjectRadiusExpr->MaterialExpressionEditorY =  400;
     }
 
+    // Time ノード (float Time パラメータで自動配線)
+    auto* TimeExpr = Cast<UMaterialExpressionTime>(
+        NewExpr(UMaterialExpressionTime::StaticClass()));
+    if (TimeExpr)
+    {
+        TimeExpr->MaterialExpressionEditorX = -400;
+        TimeExpr->MaterialExpressionEditorY =  600;
+    }
+
     const bool bHasWPO = !VertexCode.TrimStartAndEnd().IsEmpty();
     UMaterialExpressionVertexNormalWS* VertNormal = nullptr;
     if (bHasWPO)
@@ -480,6 +503,11 @@ static void BuildMaterialGraph(
             Out.Expression = ObjectRadiusExpr;
             return;
         }
+        if (PName.Equals(TEXT("Time"), ESearchCase::IgnoreCase) && TimeExpr)
+        {
+            Out.Expression = TimeExpr;
+            return;
+        }
         if ((PName.Contains(TEXT("Normal")) || PName.Contains(TEXT("normal"))) && VertNormal)
         {
             Out.Expression = VertNormal;
@@ -520,7 +548,7 @@ static void BuildMaterialGraph(
         }
 
         // 関数ボディとヘルパー関数群を抽出する。
-        const FString FuncBody    = ExtractShaderFunctionBody(SourceCode, FuncName);
+        const FString FuncBody    = InjectHLSLBuiltins(ExtractShaderFunctionBody(SourceCode, FuncName));
         const FString HelpersCode = ExtractHelperFunctions(SourceCode, FuncName);
 
         if (!HelpersCode.IsEmpty() && !FuncBody.IsEmpty())

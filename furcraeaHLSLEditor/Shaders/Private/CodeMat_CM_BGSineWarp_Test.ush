@@ -29,17 +29,15 @@ float3 FragmentShader(
     // 0..1 -> -1..1
     float2 p = uv * 2.0 - 1.0;
 
-    float  PhaseTime=Phase*Time ;
-
     // 軽い空間ゆがみ
     float2 q = p;
-    q.x += sin(p.y * (Density * 0.85) + PhaseTime * 0.70) * Warp;
-    q.y += cos(p.x * (Density * 0.75) - PhaseTime * 0.55) * Warp;
+    q.x += sin(p.y * (Density * 0.85) + Phase * 0.70) * Warp;
+    q.y += cos(p.x * (Density * 0.75) - Phase * 0.55) * Warp;
 
     // 折りたたまれた等高線筋  (tri(x) = abs(frac(x)-0.5)*2.0 をインライン)
-    float a = abs(frac( q.x * Density         + sin(q.y * 2.7  + PhaseTime * 0.31) * 0.9) - 0.5) * 2.0;
-    float b = abs(frac( q.y * (Density * 0.9) + cos(q.x * 2.1  - PhaseTime * 0.27) * 0.8) - 0.5) * 2.0;
-    float c = abs(frac((q.x + q.y) * (Density * 0.6) + PhaseTime * 0.18             ) - 0.5) * 2.0;
+    float a = abs(frac( q.x * Density         + sin(q.y * 2.7  + Phase * 0.31) * 0.9) - 0.5) * 2.0;
+    float b = abs(frac( q.y * (Density * 0.9) + cos(q.x * 2.1  - Phase * 0.27) * 0.8) - 0.5) * 2.0;
+    float c = abs(frac((q.x + q.y) * (Density * 0.6) + Phase * 0.18             ) - 0.5) * 2.0;
 
     float bands = 1.0 - saturate(a * b * c * Contrast);
 
@@ -93,11 +91,10 @@ float3 WPO_Main(
     float  VertexFreq,
     float  VertexPhaseMul)
 {
-    float  PhaseTime=Phase*Time ;
     float n =
-        sin(VertexNormal.x * VertexFreq + PhaseTime * VertexPhaseMul) *
-        sin(VertexNormal.y * VertexFreq * 1.13 - PhaseTime * VertexPhaseMul * 0.73) *
-        cos(VertexNormal.z * VertexFreq * 0.91 + PhaseTime * VertexPhaseMul * 0.57);
+        sin(VertexNormal.x * VertexFreq + Phase * VertexPhaseMul) *
+        sin(VertexNormal.y * VertexFreq * 1.13 - Phase * VertexPhaseMul * 0.73) *
+        cos(VertexNormal.z * VertexFreq * 0.91 + Phase * VertexPhaseMul * 0.57);
 
     // ObjectRadius に比例した変位: スケール変更で自動追従
     float push = n * VertexAmp * ObjectRadius;

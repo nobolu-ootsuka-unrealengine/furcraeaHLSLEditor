@@ -3,6 +3,12 @@
 #include "CodeMaterialAsset.h"
 #include "CodeMaterialCompiler.h"
 
+#if WITH_EDITOR
+#include "Materials/Material.h"
+#include "Materials/MaterialExpressionCustom.h"
+#include "Internationalization/Regex.h"
+#endif
+
 UCodeMaterialAsset::UCodeMaterialAsset()
 {
     // Default template: character outline (cel shader — shell extrusion)
@@ -39,5 +45,41 @@ void UCodeMaterialAsset::PostEditChangeProperty(FPropertyChangedEvent& E)
 {
     Super::PostEditChangeProperty(E);
     // Auto-compile on property change is intentionally disabled (Save button driven)
+}
+
+void UCodeMaterialAsset::PostLoad()
+{
+    Super::PostLoad();
+
+    // 起動時クラッシュ対策 (UE5.7 OptionalDataSize == -1 バグ回避):
+    // 保存済みの OutputMaterial の Custom Expression コードに裸の Time 参照が
+    // 残っている場合、View.GameTime バインドを先頭に注入してコンパイルエラーを防ぐ。
+    // これにより、エディタで保存 → 再起動のたびにクラッシュするループを断ち切る。
+    if (!OutputMaterial) return;
+
+    UMaterialEditorOnlyData* ED = OutputMaterial->GetEditorOnlyData();
+    if (!ED) return;
+
+    const FRegexPattern TimePat(TEXT("\\bTime\\b"));
+    const FRegexPattern FloatTimePat(TEXT("\\bfloat\\s+Time\\b"));
+    bool bPatched = false;
+
+    for (UMaterialExpression* Expr : ED->ExpressionCollection.Expressions)
+    {
+        UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expr);
+        if (!Custom) continue;
+
+        if (FRegexMatcher(TimePat, Custom->Code).FindNext() &&
+            !FRegexMatcher(FloatTimePat, Custom->Code).FindNext())
+        {
+            Custom->Code = TEXT("float Time = View.GameTime;\n") + Custom->Code;
+            bPatched = true;
+        }
+    }
+
+    if (bPatched)
+    {
+        OutputMaterial->MarkPackageDirty();
+    }
 }
 #endif

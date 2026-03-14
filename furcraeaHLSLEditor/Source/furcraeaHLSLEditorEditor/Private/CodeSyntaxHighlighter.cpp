@@ -93,11 +93,9 @@ namespace CodeHL
 			TArray<ISyntaxTokenizer::FTokenizedLine> /*TokenizedLines*/
 		) override
 		{
-			// まず plain セット（内部状態/フォールバックのため）
-			FPlainTextLayoutMarshaller::SetText(SourceString, TargetTextLayout);
-
 			if (!IsSyntaxHighlightingEnabled())
 			{
+				FPlainTextLayoutMarshaller::SetText(SourceString, TargetTextLayout);
 				return;
 			}
 
@@ -130,7 +128,10 @@ namespace CodeHL
 					{
 						const int32 B = M.GetMatchBeginning();
 						const int32 E = M.GetMatchEnding();
-						if (E > B)
+						// Guard: ICU may return UTF-8 byte offsets on lines with
+						// non-ASCII (CJK/Japanese) characters, producing
+						// out-of-range FTextRange values that break AddLine.
+						if (E > B && B >= 0 && E <= Line.Len())
 						{
 							Spans.Add({ B, E, R.StyleName });
 						}
@@ -182,6 +183,13 @@ namespace CodeHL
 				if (Cursor < Line.Len())
 				{
 					AddRun(Cursor, Line.Len(), *PlainStyle);
+				}
+
+				// 空行 (Enter直後等) でも Run が必要。空の場合は長さゼロのランを追加。
+				if (Runs.IsEmpty())
+				{
+					const FRunInfo EmptyInfo(TEXT("CodeHL"));
+					Runs.Add(FSlateTextRun::Create(EmptyInfo, LineText, *PlainStyle, FTextRange(0, 0)));
 				}
 
 				FTextLayout::FNewLineData NewLine(LineText, MoveTemp(Runs));
