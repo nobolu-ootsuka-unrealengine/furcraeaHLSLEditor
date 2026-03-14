@@ -6,6 +6,12 @@
 
 ０，以下のリンクをダウンロード
 
+furcraeaHLSLEditor_UE5.7.4V5.zip
+https://drive.google.com/file/d/1YiUHmR1g6d9WwvAtd1rGADsiNZEXRMNX/view?usp=sharing
+
+furcraeaHLSLEditor_UE5.7.4.zip (V4)
+https://drive.google.com/file/d/1gInP7W5hFB3pwlwbrbkekSzC8xOwusap/view?usp=sharing
+
 furcraeaHLSLEditor_UE5.7.3V4.zip
 https://drive.google.com/file/d/1gInP7W5hFB3pwlwbrbkekSzC8xOwusap/view?usp=sharing
 
