@@ -79,12 +79,14 @@ CodeMaterialCompiler.cpp に2箇所変更しました。
 生成先パスからフォルダを算出して作成 これにより、例えば Content/0_furcraeaTokyo/CodeMaterialAsset/NewCodeMaterialAsset に保存された CodeMaterialAsset
 に対しては、生成マテリアルも同じ Content/0_furcraeaTokyo/CodeMaterialAsset/M_NewCodeMaterialAsset に出力されます。
 
-ルール: FragmentShaderCode / VertexShaderCode には 関数定義を書かない。ヘルパーが必要なら全てインライン化する。
 
+furcraeaHLSLEditor_UE5.7.4V5.zip
+ルール: FragmentShaderCode / VertexShaderCode には 関数定義を書かない。ヘルパーが必要なら全てインライン化する。
 コンパイラの整理  
 - ExtractHelperFunctions + エスケープトリック (将来の一般的ヘルパー対応) は保持
 // @param float3 ColorC = 0.90,0.20,1.20//でBPでパラメーター化
 
+furcraeaHLSLEditor_UE5.7.4V6.zip
 ・日本語コメントがあるとVertex Shader側のコードカラーリングが効いてない不具合を修正
 ・こんどは両ペインで改行が入力できないを解決
 ・ユーザーが .ush のボディ内で Phase * Time のように Time を直接書いても View.GameTime として展開され、HLSL
