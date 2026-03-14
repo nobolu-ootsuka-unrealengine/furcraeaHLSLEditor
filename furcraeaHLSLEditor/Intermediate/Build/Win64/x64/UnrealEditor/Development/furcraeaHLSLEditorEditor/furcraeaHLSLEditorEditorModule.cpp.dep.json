@@ -1,0 +1,28 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\source\\furcraeahlsleditoreditor\\private\\furcraeahlsleditoreditormodule.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\intermediate\\build\\win64\\x64\\ue573petit25cleditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.valexpapi.cpp20.h.pch",
+        "Includes": [
+            "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\furcraeahlsleditoreditor\\definitions.furcraeahlsleditoreditor.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\developer\\assettools\\public\\assettoolsmodule.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\developer\\assettools\\public\\iassettools.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\developer\\assettools\\public\\assettypecategories.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\developer\\assettools\\public\\iassettypeactions.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\developer\\merge\\public\\merge.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\editor\\unrealed\\classes\\thumbnailrendering\\thumbnailmanager.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\editor\\unrealed\\classes\\thumbnailrendering\\thumbnailrenderer.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\unrealed\\uht\\thumbnailrenderer.generated.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\unrealed\\uht\\thumbnailmanager.generated.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\editor\\unrealed\\public\\automatedassetimportdata.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\unrealed\\uht\\automatedassetimportdata.generated.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\intermediate\\build\\win64\\unrealeditor\\inc\\assettools\\uht\\iassettools.generated.h",
+            "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\source\\furcraeahlsleditoreditor\\private\\assettypeactions_codematerialasset.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\developer\\assettools\\public\\assettypeactions_base.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\editor\\unrealed\\public\\toolkits\\simpleasseteditor.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

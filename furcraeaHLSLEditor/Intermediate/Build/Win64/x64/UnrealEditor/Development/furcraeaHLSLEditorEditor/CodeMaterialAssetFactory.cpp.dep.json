@@ -1,0 +1,18 @@
+{
+    "Version": "1.2",
+    "Data": {
+        "Source": "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\source\\furcraeahlsleditoreditor\\private\\codematerialassetfactory.cpp",
+        "ProvidedModule": "",
+        "PCH": "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\intermediate\\build\\win64\\x64\\ue573petit25cleditor\\development\\unrealed\\sharedpch.unrealed.project.valapi.valexpapi.cpp20.h.pch",
+        "Includes": [
+            "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\intermediate\\build\\win64\\x64\\unrealeditor\\development\\furcraeahlsleditoreditor\\definitions.furcraeahlsleditoreditor.h",
+            "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\source\\furcraeahlsleditoreditor\\public\\codematerialassetfactory.h",
+            "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\intermediate\\build\\win64\\unrealeditor\\inc\\furcraeahlsleditoreditor\\uht\\codematerialassetfactory.generated.h",
+            "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\source\\furcraeahlsleditor\\public\\codematerialasset.h",
+            "d:\\sandbox\\ue573petit25cl\\ue573petit25cl\\plugins\\furcraeahlsleditor\\intermediate\\build\\win64\\unrealeditor\\inc\\furcraeahlsleditor\\uht\\codematerialasset.generated.h",
+            "d:\\program files\\epic games\\ue_5.7\\engine\\source\\developer\\assettools\\public\\assettypecategories.h"
+        ],
+        "ImportedModules": [],
+        "ImportedHeaderUnits": []
+    }
+}

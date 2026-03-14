@@ -11,6 +11,8 @@
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
 #include "Materials/MaterialExpressionVertexNormalWS.h"
+#include "Materials/MaterialExpressionWorldPosition.h"
+#include "Materials/MaterialExpressionObjectRadius.h"
 #include "Materials/MaterialExpressionTwoSidedSign.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "MaterialEditingLibrary.h"
@@ -214,6 +216,25 @@ static FString DetectFunctionName(const FString& Code)
     return FString();
 }
 
+// メイン関数の前に定義されているヘルパー関数群を抽出して返す。
+// ヘルパーが存在しない（// @param コメントのみ等）場合は空文字列を返す。
+static FString ExtractHelperFunctions(const FString& Code, const FString& MainFuncName)
+{
+    const FString Pattern = FString::Printf(TEXT("\\bfloat3\\s+%s\\s*\\("), *MainFuncName);
+    FRegexMatcher MOrig(FRegexPattern(*Pattern), Code);
+    if (!MOrig.FindNext()) return FString();
+
+    const FString Before = Code.Left(MOrig.GetMatchBeginning()).TrimEnd();
+    if (Before.IsEmpty()) return FString();
+
+    // コメント除去後に関数定義が 1 つ以上あるか確認
+    const FRegexPattern FuncDefPat(TEXT("[a-zA-Z_]\\w*\\s+[a-zA-Z_]\\w*\\s*\\("));
+    FRegexMatcher FuncM(FuncDefPat, StripLineComments(Before));
+    if (!FuncM.FindNext()) return FString();
+
+    return Before;
+}
+
 // ============================================================================
 // @param parsing
 //
@@ -393,6 +414,24 @@ static void BuildMaterialGraph(
         TexCoord->MaterialExpressionEditorY =    0;
     }
 
+    // WorldPosition: スケール依存座標に使用 (float3 WorldPos という名前で自動配線)
+    auto* WorldPosExpr = Cast<UMaterialExpressionWorldPosition>(
+        NewExpr(UMaterialExpressionWorldPosition::StaticClass()));
+    if (WorldPosExpr)
+    {
+        WorldPosExpr->MaterialExpressionEditorX = -400;
+        WorldPosExpr->MaterialExpressionEditorY =  200;
+    }
+
+    // ObjectRadius: WPO のスケール依存変位に使用 (float ObjectRadius という名前で自動配線)
+    auto* ObjectRadiusExpr = Cast<UMaterialExpressionObjectRadius>(
+        NewExpr(UMaterialExpressionObjectRadius::StaticClass()));
+    if (ObjectRadiusExpr)
+    {
+        ObjectRadiusExpr->MaterialExpressionEditorX = -400;
+        ObjectRadiusExpr->MaterialExpressionEditorY =  400;
+    }
+
     const bool bHasWPO = !VertexCode.TrimStartAndEnd().IsEmpty();
     UMaterialExpressionVertexNormalWS* VertNormal = nullptr;
     if (bHasWPO)
@@ -402,11 +441,17 @@ static void BuildMaterialGraph(
         if (VertNormal)
         {
             VertNormal->MaterialExpressionEditorX = -400;
-            VertNormal->MaterialExpressionEditorY =  100;
+            VertNormal->MaterialExpressionEditorY =  300;
         }
     }
 
     // ---- 関数引数 → Expression 入力 の解決 ----
+    // 自動配線ルール (パラメータ名による):
+    //   "uv" / "UV"               → TextureCoordinate (UV 座標)
+    //   "WorldPos" / "worldpos"   → WorldPosition (絶対ワールド座標 float3)
+    //   "ObjectRadius"            → ObjectRadius (バウンディング球半径 float)
+    //   contains "Normal"         → VertexNormalWS
+    //   matches a @param          → ScalarParameter / VectorParameter
     auto ResolveInput = [&](const FString& TypeStr, const FString& PName, FExpressionInput& Out)
     {
         if (UMaterialExpression** Found = ParamExprMap.Find(PName))
@@ -423,6 +468,16 @@ static void BuildMaterialGraph(
         if (PName.Equals(TEXT("uv"), ESearchCase::IgnoreCase) && TexCoord)
         {
             Out.Expression = TexCoord;
+            return;
+        }
+        if (PName.Equals(TEXT("WorldPos"), ESearchCase::IgnoreCase) && WorldPosExpr)
+        {
+            Out.Expression = WorldPosExpr;
+            return;
+        }
+        if (PName.Equals(TEXT("ObjectRadius"), ESearchCase::IgnoreCase) && ObjectRadiusExpr)
+        {
+            Out.Expression = ObjectRadiusExpr;
             return;
         }
         if ((PName.Contains(TEXT("Normal")) || PName.Contains(TEXT("normal"))) && VertNormal)
@@ -464,13 +519,65 @@ static void BuildMaterialGraph(
             ResolveInput(Fp.Key, Fp.Value, In.Input);
         }
 
-        // 関数ボディを抽出して直接埋め込む。
-        // Custom->Code は UE が生成するラッパー関数の内部として展開されるため、
-        // 入力ピン名がそのままローカル変数名として使える。
-        const FString FuncBody = ExtractShaderFunctionBody(SourceCode, FuncName);
-        Custom->Code = !FuncBody.IsEmpty()
-            ? FuncBody
-            : FString::Printf(TEXT("// ERROR: could not extract body of '%s'\nreturn 0;\n"), *FuncName);
+        // 関数ボディとヘルパー関数群を抽出する。
+        const FString FuncBody    = ExtractShaderFunctionBody(SourceCode, FuncName);
+        const FString HelpersCode = ExtractHelperFunctions(SourceCode, FuncName);
+
+        if (!HelpersCode.IsEmpty() && !FuncBody.IsEmpty())
+        {
+            // ── Escape trick ────────────────────────────────────────────────
+            // UE は Custom->Code を以下のように展開する:
+            //   MaterialFloat3 CustomExpressionN(...) { <Code> }
+            //
+            // ヘルパー関数は HLSL の関数ボディ内に定義できないため、
+            // 「脱出トリック」でラッパー関数を早期クローズし、
+            // ヘルパー群をグローバルスコープに注入する。
+            //
+            // 生成される HLSL 構造:
+            //   MaterialFloat3 CustomExpressionN(...) {
+            //     return <ImplName>(args);      // ← 本実装への転送
+            //   }
+            //   <ヘルパー定義群>
+            //   float3 <ImplName>(params) { <FuncBody> }
+            //   void _close_<ImplName>() {     // UE の自動クローズ } を吸収
+            //   }  ← UE が自動生成する閉じ括弧
+            // ────────────────────────────────────────────────────────────────
+
+            const FString ImplName = FuncName + TEXT("_impl");
+
+            // 引数転送リスト ("uv, Phase, ...") と実装関数シグネチャ ("float2 uv, float Phase, ...") を構築
+            FString CallArgs;
+            FString ImplParams;
+            for (const TPair<FString,FString>& Fp : FuncParams)
+            {
+                if (!CallArgs.IsEmpty())   CallArgs   += TEXT(", ");
+                if (!ImplParams.IsEmpty()) ImplParams += TEXT(", ");
+                CallArgs   += Fp.Value;
+                ImplParams += Fp.Key + TEXT(" ") + Fp.Value;
+            }
+
+            FString EscCode;
+            // 1. UE のラッパー関数から実装関数を呼んで閉じる
+            EscCode += FString::Printf(TEXT("return %s(%s);\n}\n\n"), *ImplName, *CallArgs);
+            // 2. ヘルパー関数定義をグローバルスコープへ
+            EscCode += HelpersCode;
+            EscCode += TEXT("\n");
+            // 3. 実装関数 (ヘルパーを呼べるスコープ)
+            EscCode += FString::Printf(TEXT("float3 %s(%s)\n{\n"), *ImplName, *ImplParams);
+            EscCode += FuncBody;
+            EscCode += TEXT("\n}\n\n");
+            // 4. UE が自動生成する閉じ括弧を吸収するダミー関数
+            EscCode += FString::Printf(TEXT("void _close_%s()\n{"), *ImplName);
+
+            Custom->Code = EscCode;
+        }
+        else
+        {
+            // ヘルパーなし: 関数ボディを直接埋め込む (従来の動作)
+            Custom->Code = !FuncBody.IsEmpty()
+                ? FuncBody
+                : FString::Printf(TEXT("// ERROR: could not extract body of '%s'\nreturn 0;\n"), *FuncName);
+        }
         return Custom;
     };
 

@@ -1,0 +1,102 @@
+#pragma once
+
+// ===== Fragment Shader =====
+// @param float Phase = 0.0
+// @param float Density = 9.0
+// @param float Warp = 0.22
+// @param float Glow = 1.2
+// @param float Contrast = 1.6
+// @param float3 ColorA = 0.02,0.06,0.20
+// @param float3 ColorB = 0.10,0.90,1.40
+// @param float3 ColorC = 0.90,0.20,1.20
+//
+// UV ベース (スケール非依存): 模様の密度はオブジェクトサイズに関係なく一定。
+// ヘルパー関数なし版 (クラッシュ回避済み)
+//   tri(x)    → abs(frac(x) - 0.5) * 2.0
+//   hash21(p) → float2 _hp=frac(p*k); _hp+=dot(_hp,_hp+34.345); frac(_hp.x*_hp.y)
+
+float3 FragmentShader(
+    float2 uv,
+    float  Phase,
+    float  Density,
+    float  Warp,
+    float  Glow,
+    float  Contrast,
+    float3 ColorA,
+    float3 ColorB,
+    float3 ColorC)
+{
+    // 0..1 -> -1..1
+    float2 p = uv * 2.0 - 1.0;
+
+    // 軽い空間ゆがみ
+    float2 q = p;
+    q.x += sin(p.y * (Density * 0.85) + Phase * 0.70) * Warp;
+    q.y += cos(p.x * (Density * 0.75) - Phase * 0.55) * Warp;
+
+    // 折りたたまれた等高線筋  (tri(x) = abs(frac(x)-0.5)*2.0 をインライン)
+    float a = abs(frac( q.x * Density         + sin(q.y * 2.7  + Phase * 0.31) * 0.9) - 0.5) * 2.0;
+    float b = abs(frac( q.y * (Density * 0.9) + cos(q.x * 2.1  - Phase * 0.27) * 0.8) - 0.5) * 2.0;
+    float c = abs(frac((q.x + q.y) * (Density * 0.6) + Phase * 0.18             ) - 0.5) * 2.0;
+
+    float bands = 1.0 - saturate(a * b * c * Contrast);
+
+    // 細い発光筋
+    float filament =
+        pow(saturate(1.0 - a), 8.0) +
+        pow(saturate(1.0 - b), 8.0) +
+        pow(saturate(1.0 - c), 8.0);
+
+    // セルっぽい割れ目 (hash21 をローカル変数でインライン)
+    float2 cellUV = q * 6.0;
+    float2 cellID = floor(cellUV);
+    float2 cellF  = frac(cellUV) - 0.5;
+
+    float2 _hp = frac(cellID * float2(123.34, 345.45));
+    _hp += dot(_hp, _hp + 34.345);
+    float rnd = frac(_hp.x * _hp.y);
+
+    float cellMask = smoothstep(0.48, 0.08, length(cellF) + (rnd - 0.5) * 0.16);
+
+    // 色合成
+    float3 col = lerp(lerp(ColorA, ColorB, bands), ColorC, filament * 0.35);
+    col += ColorB * filament * Glow * 0.22;
+    col += ColorC * cellMask * 0.12;
+    col *= (0.35 + (1.0 - saturate(length(p) * 0.85)) * 0.95);
+
+    return saturate(col);
+}
+
+
+// ===== Vertex Shader =====
+// @param float VertexAmp = 0.06
+// @param float VertexFreq = 2.5
+// @param float VertexPhaseMul = 1.0
+//
+// ObjectRadius (float) → UMaterialExpressionObjectRadius で自動配線。
+// 変位量 = n * VertexAmp * ObjectRadius なので、
+// オブジェクトをスケールすると ObjectRadius が比例して増え、
+// 頂点変位・外形の歪みもスケールに追従する。
+//
+// VertexAmp はオブジェクト半径に対する割合で指定する:
+//   0.06 → 半径の 6% (デフォルト: 背景球でもシルエットが歪む)
+//   0.02 → 半径の 2% (控えめ)
+//   0.15 → 半径の15% (大きく歪む)
+
+float3 WPO_Main(
+    float3 VertexNormal,
+    float  ObjectRadius,
+    float  Phase,
+    float  VertexAmp,
+    float  VertexFreq,
+    float  VertexPhaseMul)
+{
+    float n =
+        sin(VertexNormal.x * VertexFreq + Phase * VertexPhaseMul) *
+        sin(VertexNormal.y * VertexFreq * 1.13 - Phase * VertexPhaseMul * 0.73) *
+        cos(VertexNormal.z * VertexFreq * 0.91 + Phase * VertexPhaseMul * 0.57);
+
+    // ObjectRadius に比例した変位: スケール変更で自動追従
+    float push = n * VertexAmp * ObjectRadius;
+    return normalize(VertexNormal) * push;
+}
