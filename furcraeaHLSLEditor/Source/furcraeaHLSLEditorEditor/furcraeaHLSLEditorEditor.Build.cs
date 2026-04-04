@@ -27,6 +27,7 @@ public class furcraeaHLSLEditorEditor : ModuleRules
             "Projects",                // ★追加（IPluginManager）
             // ★Runtimeモジュールに依存（これが無いと CodeMaterialAsset.h が見えない）
             "furcraeaHLSLEditor",
+            "InputCore",               // SComboBox が EKeys を要求する
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]

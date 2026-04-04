@@ -1,12 +1,25 @@
-// CodeMaterialAsset template
-// You can write free HLSL here (functions, structs, includes, etc.).
-// This text will be written to:
-//   Plugins/furcraeaHLSLEditor/Shaders/Private/CodeMatUser.ush
-// and included from the material custom node.
-
 #pragma once
 
-float3 MainHLSL(float2 uv)
+// ===== Fragment Shader =====
+// Fragment shader — Character Outline
+// Entry: float3 FragmentShader(float2 uv, ...) -> EmissiveColor
+//
+// @param float3 OutlineColor = 0.0,0.0,0.0
+
+float3 FragmentShader(float2 uv, float3 OutlineColor)
 {
-    return float3(uv.x, uv.y, 0.0);
+    return OutlineColor;
+}
+
+
+// ===== Vertex Shader =====
+// Vertex shader — Character Outline (Shell Extrusion)
+// Entry: float3 WPO_Main(float3 VertexNormal, ...) -> WorldPositionOffset
+// Leave this pane empty (or all commented out) to disable WPO.
+//
+// @param float OutlineWidth = 0.3
+
+float3 WPO_Main(float3 VertexNormal, float OutlineWidth)
+{
+    return normalize(VertexNormal) * OutlineWidth;
 }

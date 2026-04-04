@@ -12,6 +12,7 @@
 #include "Framework/MultiBox/MultiBoxBuilder.h"
 #include "Widgets/Docking/SDockTab.h"
 #include "Widgets/Input/SMultiLineEditableTextBox.h"
+#include "Widgets/Input/SComboBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
@@ -46,6 +47,24 @@ public:
 	{
 		Asset = InAsset;
 		check(Asset);
+
+		// Domain コンボボックスの選択肢を初期化
+		DomainOptions = {
+			MakeShared<FString>(TEXT("Surface")),
+			MakeShared<FString>(TEXT("Post Process")),
+		};
+		SelectedDomain = (Asset->Domain == ECodeMatDomain::PostProcess)
+			? DomainOptions[1] : DomainOptions[0];
+
+		// BlendableLocation コンボボックスの選択肢を初期化
+		BlendLocOptions = {
+			MakeShared<FString>(TEXT("After Tonemapping")),
+			MakeShared<FString>(TEXT("Before Tonemapping")),
+			MakeShared<FString>(TEXT("Before Translucency")),
+			MakeShared<FString>(TEXT("Replacing Tonemapper")),
+		};
+		SelectedBlendLoc = BlendLocOptions[(int32)Asset->BlendableLocation < BlendLocOptions.Num()
+			? (int32)Asset->BlendableLocation : 0];
 
 		// レイアウト
 		const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout =
@@ -169,6 +188,88 @@ private:
 					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
 					.Padding(8.0f)
 					[
+						SNew(SVerticalBox)
+						// ---- Domain 選択行 ----
+						+ SVerticalBox::Slot()
+						.AutoHeight()
+						.Padding(0.0f, 0.0f, 0.0f, 6.0f)
+						[
+							SNew(SHorizontalBox)
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							.Padding(0.0f, 0.0f, 8.0f, 0.0f)
+							[
+								SNew(STextBlock)
+									.Text(LOCTEXT("DomainLabel", "Domain:"))
+									.Font(FAppStyle::GetFontStyle("BoldFont"))
+							]
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							[
+								SNew(SComboBox<TSharedPtr<FString>>)
+									.OptionsSource(&DomainOptions)
+									.InitiallySelectedItem(SelectedDomain)
+									.OnSelectionChanged(this, &FCodeMaterialAssetEditorToolkit::OnDomainSelectionChanged)
+									.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+									{
+										return SNew(STextBlock).Text(FText::FromString(*Item));
+									})
+									[
+										SNew(STextBlock)
+											.Text_Lambda([this]()
+											{
+												return FText::FromString(SelectedDomain.IsValid() ? *SelectedDomain : TEXT("Surface"));
+											})
+									]
+							]
+							// ---- Blendable Location (PP 時のみ表示) ----
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							.VAlign(VAlign_Center)
+							.Padding(16.0f, 0.0f, 8.0f, 0.0f)
+							[
+								SNew(STextBlock)
+									.Text(LOCTEXT("BlendLocLabel", "Blendable Location:"))
+									.Font(FAppStyle::GetFontStyle("BoldFont"))
+									.Visibility_Lambda([this]()
+									{
+										return (SelectedDomain.IsValid() && *SelectedDomain == TEXT("Post Process"))
+											? EVisibility::Visible : EVisibility::Collapsed;
+									})
+							]
+							+ SHorizontalBox::Slot()
+							.AutoWidth()
+							[
+								SNew(SBox).WidthOverride(200.0f)
+								[
+									SNew(SComboBox<TSharedPtr<FString>>)
+										.OptionsSource(&BlendLocOptions)
+										.InitiallySelectedItem(SelectedBlendLoc)
+										.OnSelectionChanged(this, &FCodeMaterialAssetEditorToolkit::OnBlendLocSelectionChanged)
+										.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
+										{
+											return SNew(STextBlock).Text(FText::FromString(*Item));
+										})
+										.Visibility_Lambda([this]()
+										{
+											return (SelectedDomain.IsValid() && *SelectedDomain == TEXT("Post Process"))
+												? EVisibility::Visible : EVisibility::Collapsed;
+										})
+										[
+											SNew(STextBlock)
+												.Text_Lambda([this]()
+												{
+													return FText::FromString(SelectedBlendLoc.IsValid() ? *SelectedBlendLoc : TEXT("After Tonemapping"));
+												})
+										]
+								]
+							]
+						]
+						// ---- Fragment / Vertex ペイン ----
+						+ SVerticalBox::Slot()
+						.FillHeight(1.0f)
+						[
 						SNew(SSplitter)
 						.Orientation(Orient_Horizontal)
 						+ SSplitter::Slot()
@@ -206,9 +307,10 @@ private:
 							[
 								VertexTextBox.ToSharedRef()
 							]
-						]
-					]
-			];
+						] // SSplitter::Slot (Vertex)
+						] // SVerticalBox::Slot (FillHeight)
+					] // SBorder content (SVerticalBox)
+				];
 	}
 
 
@@ -235,6 +337,16 @@ private:
 			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Refresh")
 		);
 
+	}
+
+	void OnDomainSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type)
+	{
+		SelectedDomain = NewSelection;
+	}
+
+	void OnBlendLocSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type)
+	{
+		SelectedBlendLoc = NewSelection;
 	}
 
 	void OnFragmentTextChanged(const FText& NewText)
@@ -530,14 +642,39 @@ private:
 			}
 		}
 
-		const bool bFragChanged = (Asset->FragmentShaderCode != NewFragment);
-		const bool bVertChanged = (Asset->VertexShaderCode   != NewVertex);
+		// Domain をドロップダウン選択から Asset に反映
+		const ECodeMatDomain NewDomain = (SelectedDomain.IsValid() && *SelectedDomain == TEXT("Post Process"))
+			? ECodeMatDomain::PostProcess : ECodeMatDomain::Surface;
 
-		if (bFragChanged || bVertChanged)
+		// BlendableLocation をドロップダウン選択から Asset に反映
+		static const ECodeMatBlendableLocation BlendLocFromString[] = {
+			ECodeMatBlendableLocation::AfterTonemapping,
+			ECodeMatBlendableLocation::BeforeTonemapping,
+			ECodeMatBlendableLocation::BeforeTranslucency,
+			ECodeMatBlendableLocation::ReplacingTonemapper,
+		};
+		int32 BlendIdx = 0;
+		if (SelectedBlendLoc.IsValid())
+		{
+			for (int32 i = 0; i < BlendLocOptions.Num(); ++i)
+			{
+				if (*BlendLocOptions[i] == *SelectedBlendLoc) { BlendIdx = i; break; }
+			}
+		}
+		const ECodeMatBlendableLocation NewBlendLoc = BlendLocFromString[BlendIdx];
+
+		const bool bFragChanged      = (Asset->FragmentShaderCode != NewFragment);
+		const bool bVertChanged      = (Asset->VertexShaderCode   != NewVertex);
+		const bool bDomainChanged    = (Asset->Domain             != NewDomain);
+		const bool bBlendLocChanged  = (Asset->BlendableLocation  != NewBlendLoc);
+
+		if (bFragChanged || bVertChanged || bDomainChanged || bBlendLocChanged)
 		{
 			Asset->Modify();
 			Asset->FragmentShaderCode = NewFragment;
 			Asset->VertexShaderCode   = NewVertex;
+			Asset->Domain             = NewDomain;
+			Asset->BlendableLocation  = NewBlendLoc;
 
 			if (UPackage* Pkg = Asset->GetOutermost())
 			{
@@ -549,8 +686,8 @@ private:
 		UMaterial* Mat = nullptr;
 		FString Err;
 
-		UE_LOG(LogTemp, Warning, TEXT("Compile start: FragChanged=%d VertChanged=%d OutputMaterial=%s"),
-			bFragChanged ? 1 : 0, bVertChanged ? 1 : 0, *GetNameSafe(Asset->OutputMaterial));
+		UE_LOG(LogTemp, Warning, TEXT("Compile start: FragChanged=%d VertChanged=%d DomainChanged=%d OutputMaterial=%s"),
+			bFragChanged ? 1 : 0, bVertChanged ? 1 : 0, bDomainChanged ? 1 : 0, *GetNameSafe(Asset->OutputMaterial));
 
 		if (CodeMat::CompileCodeAssetToMaterial(Asset, Mat, Err) && Mat)
 		{
@@ -592,6 +729,14 @@ private:
 	TSharedPtr<SMultiLineEditableTextBox> VertexTextBox;
 	FString WorkingFragment;
 	FString WorkingVertex;
+
+	// Domain ドロップダウン
+	TArray<TSharedPtr<FString>> DomainOptions;
+	TSharedPtr<FString>         SelectedDomain;
+
+	// BlendableLocation ドロップダウン
+	TArray<TSharedPtr<FString>> BlendLocOptions;
+	TSharedPtr<FString>         SelectedBlendLoc;
 };
 
 // ============================================================================

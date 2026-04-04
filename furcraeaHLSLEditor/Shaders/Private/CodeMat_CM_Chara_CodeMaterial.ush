@@ -1,0 +1,28 @@
+#pragma once
+
+// ===== Fragment Shader =====
+  // @param Texture2D AlbedoTex
+  // @param Texture2D HatchTex           = /Game/3Dnchu/Textures/T_Stroke-SD11.T_Stroke-SD11
+  // @param float     HatchTiling        = 10.0
+  // @param float     ToonSteps          = 4.0
+  // @param float     HatchDarkThreshold = 0.4
+
+  float3 Char_ToonHatching(
+      float2    uv,
+      Texture2D AlbedoTex,
+      Texture2D HatchTex,
+      float     HatchTiling,
+      float     ToonSteps,
+      float     HatchDarkThreshold)
+  {
+      float4 albedo = Texture2DSample(AlbedoTex, AlbedoTexSampler, uv);
+
+      float lum     = dot(albedo.rgb, float3(0.299, 0.587, 0.114));
+      float toonLum = floor(lum * ToonSteps + 0.5) / ToonSteps;
+      float3 toon   = albedo.rgb * (toonLum / max(lum, 0.0001));
+
+      float4 hatchSamp = Texture2DSample(HatchTex, HatchTexSampler, uv * HatchTiling);
+      float  hatch     = lerp(1.0, hatchSamp.r, step(toonLum, HatchDarkThreshold));
+
+      return toon * hatch;
+  }

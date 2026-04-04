@@ -16,6 +16,9 @@
 #include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionTwoSidedSign.h"
 #include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionSceneTexture.h"
+#include "Materials/MaterialExpressionTextureObject.h"
+#include "Materials/MaterialExpressionTextureObjectParameter.h"
 #include "MaterialEditingLibrary.h"
 #include "Factories/MaterialFactoryNew.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -269,48 +272,69 @@ static FString ExtractHelperFunctions(const FString& Code, const FString& MainFu
 
 struct FCodeMatParam
 {
-    enum class EType { Scalar, Vector3, Vector4 } Type;
+    enum class EType { Scalar, Vector3, Vector4, Texture2D } Type;
     FString      Name;
     float        DefaultScalar = 0.f;
     FLinearColor DefaultColor  = FLinearColor(0, 0, 0, 1);
+    FString      TexturePath;   // Texture2D type のみ使用
 };
 
 static TArray<FCodeMatParam> ParseCodeMatParams(const FString& Code)
 {
     TArray<FCodeMatParam> Params;
-    const FRegexPattern Pat(TEXT("//\\s*@param\\s+(float[34]?)\\s+(\\w+)\\s*=\\s*([^\\n]+)"));
-    FRegexMatcher M(Pat, Code);
-    while (M.FindNext())
+
+    // float / float3 / float4 パラメータ
     {
-        const FString TypeStr  = M.GetCaptureGroup(1).TrimStartAndEnd();
-        const FString NameStr  = M.GetCaptureGroup(2).TrimStartAndEnd();
-        const FString ValueStr = M.GetCaptureGroup(3).TrimStartAndEnd();
-
-        FCodeMatParam P;
-        P.Name = NameStr;
-
-        if (TypeStr == TEXT("float"))
+        const FRegexPattern Pat(TEXT("//\\s*@param\\s+(float[34]?)\\s+(\\w+)\\s*=\\s*([^\\n]+)"));
+        FRegexMatcher M(Pat, Code);
+        while (M.FindNext())
         {
-            P.Type          = FCodeMatParam::EType::Scalar;
-            P.DefaultScalar = FCString::Atof(*ValueStr);
-        }
-        else
-        {
-            P.Type = (TypeStr == TEXT("float4"))
-                   ? FCodeMatParam::EType::Vector4
-                   : FCodeMatParam::EType::Vector3;
+            const FString TypeStr  = M.GetCaptureGroup(1).TrimStartAndEnd();
+            const FString NameStr  = M.GetCaptureGroup(2).TrimStartAndEnd();
+            const FString ValueStr = M.GetCaptureGroup(3).TrimStartAndEnd();
 
-            TArray<FString> Parts;
-            ValueStr.ParseIntoArray(Parts, TEXT(","));
-            auto Comp = [&](int32 i)
+            FCodeMatParam P;
+            P.Name = NameStr;
+
+            if (TypeStr == TEXT("float"))
             {
-                return Parts.IsValidIndex(i) ? FCString::Atof(*Parts[i].TrimStartAndEnd()) : 0.f;
-            };
-            P.DefaultColor = FLinearColor(Comp(0), Comp(1), Comp(2),
-                                          Parts.Num() >= 4 ? Comp(3) : 1.f);
+                P.Type          = FCodeMatParam::EType::Scalar;
+                P.DefaultScalar = FCString::Atof(*ValueStr);
+            }
+            else
+            {
+                P.Type = (TypeStr == TEXT("float4"))
+                       ? FCodeMatParam::EType::Vector4
+                       : FCodeMatParam::EType::Vector3;
+
+                TArray<FString> Parts;
+                ValueStr.ParseIntoArray(Parts, TEXT(","));
+                auto Comp = [&](int32 i)
+                {
+                    return Parts.IsValidIndex(i) ? FCString::Atof(*Parts[i].TrimStartAndEnd()) : 0.f;
+                };
+                P.DefaultColor = FLinearColor(Comp(0), Comp(1), Comp(2),
+                                              Parts.Num() >= 4 ? Comp(3) : 1.f);
+            }
+            Params.Add(P);
         }
-        Params.Add(P);
     }
+
+    // Texture2D パラメータ  (例: // @param Texture2D HatchTex = /Game/Foo/T_Bar.T_Bar)
+    // デフォルトパスは省略可 (例: // @param Texture2D AlbedoTex)
+    {
+        const FRegexPattern TexPat(TEXT("//\\s*@param\\s+Texture2D\\s+(\\w+)(?:\\s*=\\s*([^\\n]+))?"));
+        FRegexMatcher M(TexPat, Code);
+        while (M.FindNext())
+        {
+            FCodeMatParam P;
+            P.Type        = FCodeMatParam::EType::Texture2D;
+            P.Name        = M.GetCaptureGroup(1).TrimStartAndEnd();
+            P.TexturePath = M.GetCaptureGroup(2).TrimStartAndEnd();
+            Params.Add(P);
+        }
+    }
+
     return Params;
 }
 
@@ -348,9 +372,11 @@ static TArray<TPair<FString, FString>> ExtractFuncParams(const FString& Code, co
 // ============================================================================
 
 static void BuildMaterialGraph(
-    UMaterial*     Material,
-    const FString& FragmentCode,
-    const FString& VertexCode)
+    UMaterial*                  Material,
+    const FString&              FragmentCode,
+    const FString&              VertexCode,
+    ECodeMatDomain              Domain,
+    ECodeMatBlendableLocation   BlendLoc)
 {
     if (!Material) return;
 
@@ -401,6 +427,30 @@ static void BuildMaterialGraph(
                 auto* E = Cast<UMaterialExpressionScalarParameter>(
                     NewExpr(UMaterialExpressionScalarParameter::StaticClass()));
                 if (E) { E->ParameterName = FName(*P.Name); E->DefaultValue = P.DefaultScalar; Expr = E; }
+            }
+            else if (P.Type == FCodeMatParam::EType::Texture2D)
+            {
+                // TextureObjectParameter: マテリアルインスタンスで上書き可能なテクスチャパラメータ
+                auto* E = Cast<UMaterialExpressionTextureObjectParameter>(
+                    NewExpr(UMaterialExpressionTextureObjectParameter::StaticClass()));
+                if (E)
+                {
+                    E->ParameterName = FName(*P.Name);
+                    if (!P.TexturePath.IsEmpty())
+                    {
+                        // パスに ".AssetName" サフィックスがなければ補完する
+                        FString TexPath = P.TexturePath;
+                        if (!TexPath.Contains(TEXT(".")))
+                        {
+                            int32 LastSlash;
+                            if (TexPath.FindLastChar(TEXT('/'), LastSlash))
+                                TexPath = TexPath + TEXT(".") + TexPath.RightChop(LastSlash + 1);
+                        }
+                        UTexture* Tex = LoadObject<UTexture>(nullptr, *TexPath);
+                        if (Tex) E->Texture = Tex;
+                    }
+                    Expr = E;
+                }
             }
             else
             {
@@ -455,7 +505,10 @@ static void BuildMaterialGraph(
         TimeExpr->MaterialExpressionEditorY =  600;
     }
 
-    const bool bHasWPO = !VertexCode.TrimStartAndEnd().IsEmpty();
+    const bool bIsPostProcess = (Domain == ECodeMatDomain::PostProcess);
+    // PostProcess ドメインでは WPO は使用しない
+    const bool bHasWPO = !bIsPostProcess && !VertexCode.TrimStartAndEnd().IsEmpty();
+
     UMaterialExpressionVertexNormalWS* VertNormal = nullptr;
     if (bHasWPO)
     {
@@ -467,6 +520,27 @@ static void BuildMaterialGraph(
             VertNormal->MaterialExpressionEditorY =  300;
         }
     }
+
+    // ---- PostProcess: SceneTexture ノード（パラメータ名で自動配線） ----
+    // 対応パラメータ名: SceneColor / SceneDepth / CustomDepth / CustomStencil
+    TMap<ESceneTextureId, UMaterialExpressionSceneTexture*> SceneTexMap;
+    auto GetOrCreateSceneTex = [&](ESceneTextureId TexId, int32 NodeY) -> UMaterialExpressionSceneTexture*
+    {
+        if (auto* Found = SceneTexMap.Find(TexId)) return *Found;
+        auto* ST = Cast<UMaterialExpressionSceneTexture>(
+            NewExpr(UMaterialExpressionSceneTexture::StaticClass()));
+        if (ST)
+        {
+            ST->SceneTextureId            = TexId;
+            ST->bFiltered                 = false;
+            ST->MaterialExpressionEditorX = -600;
+            ST->MaterialExpressionEditorY = NodeY;
+            // UV: TexCoord[0] をスクリーン UV として接続
+            if (TexCoord) ST->Coordinates.Expression = TexCoord;
+            SceneTexMap.Add(TexId, ST);
+        }
+        return ST;
+    };
 
     // ---- 関数引数 → Expression 入力 の解決 ----
     // 自動配線ルール (パラメータ名による):
@@ -512,6 +586,28 @@ static void BuildMaterialGraph(
         {
             Out.Expression = VertNormal;
             return;
+        }
+
+        // ---- PostProcess: SceneTexture 自動配線 ----
+        if (bIsPostProcess)
+        {
+            static const TPair<const TCHAR*, ESceneTextureId> PPWireRules[] = {
+                // PP マテリアルで SceneColor は使用不可。PostProcessInput0 を使う。
+                { TEXT("SceneColor"),     PPI_PostProcessInput0 },
+                { TEXT("SceneDepth"),     PPI_SceneDepth        },
+                { TEXT("CustomDepth"),    PPI_CustomDepth       },
+                { TEXT("CustomStencil"),  PPI_CustomStencil     },
+            };
+            for (int32 i = 0; i < UE_ARRAY_COUNT(PPWireRules); ++i)
+            {
+                if (PName.Equals(PPWireRules[i].Key, ESearchCase::IgnoreCase))
+                {
+                    constexpr int32 SceneTexBaseY = 800;
+                    if (auto* ST = GetOrCreateSceneTex(PPWireRules[i].Value, SceneTexBaseY + i * 120))
+                        Out.Expression = ST;
+                    return;
+                }
+            }
         }
     };
 
@@ -636,9 +732,26 @@ static void BuildMaterialGraph(
         ED->EmissiveColor.OutputIndex  = 0;
     }
 
-    if (bHasWPO)
+    if (bIsPostProcess)
     {
-        // アウトライン（シェル法）: バック面だけを描画する
+        // PostProcess ドメイン
+        Material->MaterialDomain = MD_PostProcess;
+        Material->TwoSided       = 0;
+        Material->BlendMode      = BLEND_Opaque;
+
+        static const EBlendableLocation BlendLocMap[] = {
+            BL_SceneColorAfterTonemapping, // AfterTonemapping
+            BL_SceneColorAfterDOF,         // BeforeTonemapping (UE5.7: renamed)
+            BL_SceneColorBeforeDOF,        // BeforeTranslucency (UE5.7: renamed)
+            BL_ReplacingTonemapper,        // ReplacingTonemapper
+        };
+        const int32 Idx = FMath::Clamp((int32)BlendLoc, 0, (int32)UE_ARRAY_COUNT(BlendLocMap) - 1);
+        Material->BlendableLocation = BlendLocMap[Idx];
+    }
+    else if (bHasWPO)
+    {
+        // Surface + WPO: アウトライン（シェル法）— バック面だけを描画する
+        Material->MaterialDomain = MD_Surface;
         Material->TwoSided  = 1;
         Material->BlendMode = BLEND_Masked;
 
@@ -661,6 +774,7 @@ static void BuildMaterialGraph(
     }
     else
     {
+        Material->MaterialDomain = MD_Surface;
         Material->TwoSided  = 0;
         Material->BlendMode = BLEND_Opaque;
     }
@@ -715,7 +829,7 @@ bool CodeMat::CompileCodeAssetToMaterial(
     FlushShaderFileCache();
 #endif
 
-    BuildMaterialGraph(Mat, SafeFragCode, SafeVertCode);
+    BuildMaterialGraph(Mat, SafeFragCode, SafeVertCode, Asset->Domain, Asset->BlendableLocation);
 
 #if WITH_EDITOR
     // PostEditChange がキックしたシェーダーコンパイルが完全に終わるまで待機する。

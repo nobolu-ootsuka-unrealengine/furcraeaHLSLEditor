@@ -1,0 +1,70 @@
+#pragma once
+
+// ===== Fragment Shader =====
+  // @param Texture2D HatchTex              = /Game/3Dnchu/Textures/T_Stroke-SD11.T_Stroke-SD11
+  // @param float     HatchTiling           = 10.0
+  // @param float     OutlineThickness      = 1.0
+  // @param float     OutlineNormalThreshold= 0.3
+  // @param float3    OutlineColor          = 0.0,0.0,0.0
+  // @param float     ToonSteps             = 4.0
+  // @param float     HatchDarkThreshold    = 0.4
+
+  float3 PP_ToonHatching_BGOnly(
+      float2    uv,
+      float4    SceneColor,
+      float4    CustomStencil,
+      Texture2D HatchTex,
+      float     HatchTiling,
+      float     OutlineThickness,
+      float     OutlineNormalThreshold,
+      float3    OutlineColor,
+      float     ToonSteps,
+      float     HatchDarkThreshold)
+  {
+      float2 bufUV = GetDefaultSceneTextureUV(Parameters, 14);
+      float2 px    = View.BufferSizeAndInvSize.zw * OutlineThickness;
+      float3 color = SceneColor.rgb;
+
+      // キャラ判定: CustomStencil.r は 0–255 (stencil=2 → isCharacter=1)
+      float stencilVal  = CustomStencil.r;
+      float isCharacter = step(1.5, stencilVal) * (1.0 - step(2.5, stencilVal));
+      float applyPP     = 1.0 - isCharacter;
+
+      // ── WorldNormal アウトライン ──────────────────────────────
+      float3 n  = SceneTextureLookup(bufUV,                     8, false).rgb * 2.0 - 1.0;
+      float3 nR = SceneTextureLookup(bufUV + float2( px.x, 0), 8, false).rgb * 2.0 - 1.0;
+      float3 nL = SceneTextureLookup(bufUV + float2(-px.x, 0), 8, false).rgb * 2.0 - 1.0;
+      float3 nU = SceneTextureLookup(bufUV + float2(0,  px.y), 8, false).rgb * 2.0 - 1.0;
+      float3 nD = SceneTextureLookup(bufUV + float2(0, -px.y), 8, false).rgb * 2.0 - 1.0;
+
+      float edgeN   = length(n - nR) + length(n - nL) + length(n - nU) + length(n - nD);
+      float outline = step(OutlineNormalThreshold, edgeN);
+
+      // ── トゥーンシェーダー ────────────────────────────────────
+      float lum     = dot(color, float3(0.299, 0.587, 0.114));
+      float toonLum = floor(lum * ToonSteps + 0.5) / ToonSteps;
+      float3 toon   = color * (toonLum / max(lum, 0.0001));
+
+      // ── テクスチャハッチング ──────────────────────────────────
+      // 暗いピクセルだけハッチを適用 (明るい部分は素のトゥーンを維持)
+      float4 hatchSamp = Texture2DSample(HatchTex, HatchTexSampler, bufUV * HatchTiling);
+      float  hatch     = lerp(1.0, hatchSamp.r, step(toonLum, HatchDarkThreshold));
+
+      // ── 合成 ─────────────────────────────────────────────────
+      float3 stylized = lerp(OutlineColor, toon * hatch, 1.0 - outline);
+
+      return lerp(color, stylized, applyPP);
+  }
+
+
+// ===== Vertex Shader =====
+// Vertex shader — Character Outline (Shell Extrusion)
+// Entry: float3 WPO_Main(float3 VertexNormal, ...) -> WorldPositionOffset
+// Leave this pane empty (or all commented out) to disable WPO.
+//
+// @param float OutlineWidth = 0.3
+
+float3 WPO_Main(float3 VertexNormal, float OutlineWidth)
+{
+    return normalize(VertexNormal) * OutlineWidth;
+}

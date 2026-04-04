@@ -26,20 +26,34 @@ float3 FragmentShader(
     float3 ColorB,
     float3 ColorC)
 {
-    // 0..1 -> -1..1
-    float2 p = uv * 2.0 - 1.0;
+    // ループ原則:
+    //   frac(q * N)   は N が整数のとき UV[0,1] 境界で完全一致
+    //   sin/cos(x * TAU * N) は N が整数のとき周期1でタイル
+    const float TAU = 6.28318530718;
 
-    float  PhaseTime=Phase*Time ;
+    float PhaseTime = Phase * Time;
 
-    // 軽い空間ゆがみ
-    float2 q = p;
-    q.x += sin(p.y * (Density * 0.85) + PhaseTime * 0.70) * Warp;
-    q.y += cos(p.x * (Density * 0.75) - PhaseTime * 0.55) * Warp;
+    // ――― 整数バンド数 (非整数は境界でズレる) ―――
+    float Da = round(Density);          // ≈ 9   (元: Density     = 9.0  → OK)
+    float Db = round(Density * 0.9);    // ≈ 8   (元: Density*0.9 = 8.1  → NG → 8)
+    float Dc = round(Density * 0.6);    // ≈ 5   (元: Density*0.6 = 5.4  → NG → 5)
 
-    // 折りたたまれた等高線筋  (tri(x) = abs(frac(x)-0.5)*2.0 をインライン)
-    float a = abs(frac( q.x * Density         + sin(q.y * 2.7  + PhaseTime * 0.31) * 0.9) - 0.5) * 2.0;
-    float b = abs(frac( q.y * (Density * 0.9) + cos(q.x * 2.1  - PhaseTime * 0.27) * 0.8) - 0.5) * 2.0;
-    float c = abs(frac((q.x + q.y) * (Density * 0.6) + PhaseTime * 0.18             ) - 0.5) * 2.0;
+    // ――― タイリング対応ゆがみ ―――
+    // sin/cos の空間周波数を整数サイクル(TAU倍)にする
+    // → UV 0→1 でちょうど N 周期 → 境界の値が一致
+    // 振幅は p空間(範囲2)→UV空間(範囲1) で 0.5 倍
+    float Nwy = round(Density * 0.85); // ≈ 8 cycles
+    float Nwx = round(Density * 0.75); // ≈ 7 cycles
+    float2 q = uv;
+    q.x += sin(uv.y * TAU * Nwy + PhaseTime * 0.70) * Warp * 0.5;
+    q.y += cos(uv.x * TAU * Nwx - PhaseTime * 0.55) * Warp * 0.5;
+
+    // ――― 等高線バンド ―――
+    // クロス軸も整数サイクル(TAU * 1)を使用
+    // sin(q.y*TAU + t) は q.y が 0→1 で 1 周期 → 境界一致
+    float a = abs(frac(q.x * Da + sin(q.y * TAU + PhaseTime * 0.31) * 0.9) - 0.5) * 2.0;
+    float b = abs(frac(q.y * Db + cos(q.x * TAU - PhaseTime * 0.27) * 0.8) - 0.5) * 2.0;
+    float c = abs(frac((q.x + q.y) * Dc  + PhaseTime * 0.18)               - 0.5) * 2.0;
 
     float bands = 1.0 - saturate(a * b * c * Contrast);
 
@@ -49,8 +63,9 @@ float3 FragmentShader(
         pow(saturate(1.0 - b), 8.0) +
         pow(saturate(1.0 - c), 8.0);
 
-    // セルっぽい割れ目 (hash21 をローカル変数でインライン)
-    float2 cellUV = q * 6.0;
+    // ――― セルっぽい割れ目 ―――
+    // frac(q) でラップしてから * 6 → セルIDが UV 境界でループ
+    float2 cellUV = frac(q) * 6.0;
     float2 cellID = floor(cellUV);
     float2 cellF  = frac(cellUV) - 0.5;
 
@@ -60,11 +75,12 @@ float3 FragmentShader(
 
     float cellMask = smoothstep(0.48, 0.08, length(cellF) + (rnd - 0.5) * 0.16);
 
-    // 色合成
+    // 色合成 (ビネットは中心基準で維持)
+    float2 pv = uv * 2.0 - 1.0;
     float3 col = lerp(lerp(ColorA, ColorB, bands), ColorC, filament * 0.35);
     col += ColorB * filament * Glow * 0.22;
     col += ColorC * cellMask * 0.12;
-    col *= (0.35 + (1.0 - saturate(length(p) * 0.85)) * 0.95);
+    col *= (0.35 + (1.0 - saturate(length(pv) * 0.85)) * 0.95);
 
     return saturate(col);
 }
