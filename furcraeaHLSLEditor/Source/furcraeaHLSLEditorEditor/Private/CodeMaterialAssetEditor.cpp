@@ -472,8 +472,8 @@ private:
 	}
 
 	// Validate fragment shader code (required)
-	// Entry: float3 <AnyName>(float2 uv, ...)        UV 座標ベース
-	//     or float3 <AnyName>(float3 WorldPos, ...)  ワールド座標ベース
+	// Entry: float3/float4 <AnyName>(float2 uv, ...)        UV 座標ベース
+	//     or float3/float4 <AnyName>(float3 WorldPos, ...)  ワールド座標ベース
 	static bool ValidateFragmentCode(const FString& Code, FString& OutError)
 	{
 		if (Code.IsEmpty() || IsWhitespaceOnly(Code))
@@ -484,13 +484,12 @@ private:
 
 		const FString Stripped = StripComments(Code);
 
-		// 最初の引数が float2 または float3 であれば OK
-		// (uv ベース / WorldPos ベース どちらも許可)
-		const FRegexPattern EntryPat(TEXT("\\bfloat3\\s+\\w+\\s*\\(\\s*float[23]\\s+[A-Za-z_][A-Za-z0-9_]*"));
+		// 返り値 float3 または float4、第一引数 float2/float3 であれば OK
+		const FRegexPattern EntryPat(TEXT("\\bfloat[34]\\s+\\w+\\s*\\(\\s*float[23]\\s+[A-Za-z_][A-Za-z0-9_]*"));
 		FRegexMatcher EntryM(EntryPat, Stripped);
 		if (!EntryM.FindNext())
 		{
-			OutError = TEXT("Entry signature must be: float3 <FuncName>(float2 uv, ...) or float3 <FuncName>(float3 WorldPos, ...)");
+			OutError = TEXT("Entry signature must be: float3/float4 <FuncName>(float2 uv, ...) or float3/float4 <FuncName>(float3 WorldPos, ...)");
 			return false;
 		}
 

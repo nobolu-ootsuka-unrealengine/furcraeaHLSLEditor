@@ -222,22 +222,31 @@ static FString InjectHLSLBuiltins(const FString& Body)
     return Prefix.IsEmpty() ? Body : (Prefix + Body);
 }
 
-// HLSL ソース内の最初の float3 関数定義の関数名を返す（コメント内は除外）
+// HLSL ソース内の最初の float3/float4 関数定義の関数名を返す（コメント内は除外）
 static FString DetectFunctionName(const FString& Code)
 {
     const FString Stripped = StripLineComments(Code);
-    const FRegexPattern Pat(TEXT("float3\\s+(\\w+)\\s*\\("));
+    const FRegexPattern Pat(TEXT("float[34]\\s+(\\w+)\\s*\\("));
     FRegexMatcher M(Pat, Stripped);
     if (M.FindNext())
         return M.GetCaptureGroup(1).TrimStartAndEnd();
     return FString();
 }
 
+// Fragment 関数の返り値が float4 なら 4、それ以外は 3 を返す
+static int32 DetectFragReturnComponents(const FString& Code)
+{
+    const FString Stripped = StripLineComments(Code);
+    const FRegexPattern Pat(TEXT("float4\\s+\\w+\\s*\\("));
+    if (FRegexMatcher(Pat, Stripped).FindNext()) return 4;
+    return 3;
+}
+
 // メイン関数の前に定義されているヘルパー関数群を抽出して返す。
 // ヘルパーが存在しない（// @param コメントのみ等）場合は空文字列を返す。
 static FString ExtractHelperFunctions(const FString& Code, const FString& MainFuncName)
 {
-    const FString Pattern = FString::Printf(TEXT("\\bfloat3\\s+%s\\s*\\("), *MainFuncName);
+    const FString Pattern = FString::Printf(TEXT("\\bfloat[34]\\s+%s\\s*\\("), *MainFuncName);
     FRegexMatcher MOrig(FRegexPattern(*Pattern), Code);
     if (!MOrig.FindNext()) return FString();
 
@@ -399,6 +408,7 @@ static void BuildMaterialGraph(
     ED->EmissiveColor.Expression       = nullptr;
     ED->WorldPositionOffset.Expression = nullptr;
     ED->OpacityMask.Expression         = nullptr;
+    ED->Opacity.Expression             = nullptr;
 
     // Expression を生成して ExpressionCollection に登録するヘルパー
     auto NewExpr = [&](UClass* ExprClass) -> UMaterialExpression*
@@ -644,7 +654,16 @@ static void BuildMaterialGraph(
         }
 
         // 関数ボディとヘルパー関数群を抽出する。
-        const FString FuncBody    = InjectHLSLBuiltins(ExtractShaderFunctionBody(SourceCode, FuncName));
+        FString FuncBody = ExtractShaderFunctionBody(SourceCode, FuncName);
+        const bool bHasExplicitTimeParam = FuncParams.ContainsByPredicate(
+            [](const TPair<FString, FString>& Fp)
+            {
+                return Fp.Value.Equals(TEXT("Time"), ESearchCase::IgnoreCase);
+            });
+        if (!bHasExplicitTimeParam)
+        {
+            FuncBody = InjectHLSLBuiltins(FuncBody);
+        }
         const FString HelpersCode = ExtractHelperFunctions(SourceCode, FuncName);
 
         if (!HelpersCode.IsEmpty() && !FuncBody.IsEmpty())
@@ -680,14 +699,15 @@ static void BuildMaterialGraph(
                 ImplParams += Fp.Key + TEXT(" ") + Fp.Value;
             }
 
-            FString EscCode;
+            const FString RetTypeStr = (OutType == CMOT_Float4) ? TEXT("float4") : TEXT("float3");
+        FString EscCode;
             // 1. UE のラッパー関数から実装関数を呼んで閉じる
             EscCode += FString::Printf(TEXT("return %s(%s);\n}\n\n"), *ImplName, *CallArgs);
             // 2. ヘルパー関数定義をグローバルスコープへ
             EscCode += HelpersCode;
             EscCode += TEXT("\n");
             // 3. 実装関数 (ヘルパーを呼べるスコープ)
-            EscCode += FString::Printf(TEXT("float3 %s(%s)\n{\n"), *ImplName, *ImplParams);
+            EscCode += FString::Printf(TEXT("%s %s(%s)\n{\n"), *RetTypeStr, *ImplName, *ImplParams);
             EscCode += FuncBody;
             EscCode += TEXT("\n}\n\n");
             // 4. UE が自動生成する閉じ括弧を吸収するダミー関数
@@ -722,19 +742,47 @@ static void BuildMaterialGraph(
         }
     }
 
-    const FString FragFuncName = DetectFunctionName(FragmentCode);
+    const FString FragFuncName    = DetectFunctionName(FragmentCode);
+    const int32   FragComponents  = DetectFragReturnComponents(FragmentCode);
+    const bool    bFragFloat4     = (FragComponents == 4);
+    const ECustomMaterialOutputType FragOutType = bFragFloat4 ? CMOT_Float4 : CMOT_Float3;
     auto* FragCustom = !FragFuncName.IsEmpty()
-        ? BuildCustomNode(FragFuncName, FragmentCode, CMOT_Float3, 0)
+        ? BuildCustomNode(FragFuncName, FragmentCode, FragOutType, 0)
         : nullptr;
     if (FragCustom)
     {
-        ED->EmissiveColor.Expression   = FragCustom;
-        ED->EmissiveColor.OutputIndex  = 0;
+        if (bFragFloat4)
+        {
+            // RGB → EmissiveColor
+            ED->EmissiveColor.Expression  = FragCustom;
+            ED->EmissiveColor.OutputIndex = 0;
+            ED->EmissiveColor.Mask        = 1;
+            ED->EmissiveColor.MaskR       = 1;
+            ED->EmissiveColor.MaskG       = 1;
+            ED->EmissiveColor.MaskB       = 1;
+            ED->EmissiveColor.MaskA       = 0;
+            // Alpha → Opacity (Surface only; PP uses BLEND_Opaque with explicit SceneColor lerp)
+            if (!bIsPostProcess)
+            {
+                ED->Opacity.Expression        = FragCustom;
+                ED->Opacity.OutputIndex       = 0;
+                ED->Opacity.Mask              = 1;
+                ED->Opacity.MaskR             = 0;
+                ED->Opacity.MaskG             = 0;
+                ED->Opacity.MaskB             = 0;
+                ED->Opacity.MaskA             = 1;
+            }
+        }
+        else
+        {
+            ED->EmissiveColor.Expression  = FragCustom;
+            ED->EmissiveColor.OutputIndex = 0;
+        }
     }
 
     if (bIsPostProcess)
     {
-        // PostProcess ドメイン
+        // PostProcess ドメイン — 常に Opaque: SceneColor 合成はシェーダー内の lerp で行う
         Material->MaterialDomain = MD_PostProcess;
         Material->TwoSided       = 0;
         Material->BlendMode      = BLEND_Opaque;
@@ -778,6 +826,14 @@ static void BuildMaterialGraph(
         Material->TwoSided  = 0;
         Material->BlendMode = BLEND_Opaque;
     }
+
+    // The generated book page materials are intended for skeletal meshes.
+    // Keeping StaticMesh usage off avoids UE 5.7 PathTracing LocalVF permutations
+    // that can duplicate Material.ush uniform buffer declarations.
+    Material->bUsedWithSkeletalMesh = 1;
+    Material->bUsedWithStaticMesh = 0;
+    Material->bAutomaticallySetUsageInEditor = 0;
+    Material->bCastRayTracedShadows = 0;
 
     Material->SetShadingModel(MSM_Unlit);
 

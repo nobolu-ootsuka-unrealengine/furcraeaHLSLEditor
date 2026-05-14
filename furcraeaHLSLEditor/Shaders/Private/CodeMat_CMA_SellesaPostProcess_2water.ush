@@ -1,0 +1,68 @@
+#pragma once
+
+// ===== Fragment Shader =====
+  // Fragment shader — Page Turn (MBL/NextPage 移植)
+  // ref: https://esprog.hatenablog.com/entry/2016/03/13/130506
+  // SceneColor は自動配線 (PostProcessInput0)
+  //
+  // TurnSpeed > 0 → Time で自動アニメーション
+  // TurnSpeed = 0 → Flip パラメーターを Blueprint で手動制御 (1=全開, -1=めくり完了)
+  //
+  // @param float TurnSpeed = 0.15
+  // @param float Flip = 1.0
+  // @param float WaveAmp = 0.10
+  // @param float CurlWidth = 0.007
+  // @param float ShadowStrength = 0.28
+  // @param float3 FrontColor = 0.97,0.94,0.87
+  // @param float3 BackColor = 0.74,0.70,0.62
+
+  float4 FragmentShader(
+      float2 uv,
+      float TurnSpeed, float Flip, float WaveAmp, float CurlWidth, float ShadowStrength,
+      float3 FrontColor, float3 BackColor, float3 SceneColor
+  )
+  {
+      float Time = View.GameTime;
+
+      // flip: 1=ページ全開き, 0=半分, -1=めくり完了
+      float flip = (TurnSpeed > 0.001)
+                 ? (1.0 - frac(Time * TurnSpeed) * 2.0)
+                 : Flip;
+
+      // UE は y=0 が上なので、元シェーダー(Unity y=0 下)に合わせて反転
+      float2 u = float2(uv.x, 1.0 - uv.y);
+
+      // ---- 3 本のライン (元シェーダー l0/l1/l2) ----
+      float l0 = u.x - flip;                               // clip ライン
+      float l1 = flip       + WaveAmp * sin(u.y * 3.0);   // 折り領域・左境界
+      float l2 = 1.0 - flip + WaveAmp * cos(u.x * 2.0);  // 折り領域・上境界
+
+      float visible = step(l0, u.y);                        // 1 = ページ可視
+      float folded  = step(l1, u.x) * step(u.y, l2) * visible; // 1 = バック面
+
+      // ---- fold ライン (y = x - flip) 垂直距離 ----
+      float dist = (u.y - u.x + flip) * 0.7071; // /sqrt(2)
+
+      // 光沢ライン (fold クリース)
+      float highlight  = exp(-abs(dist) / max(CurlWidth, 0.001)) * 0.50;
+
+      // ページ面の影 (fold 直後に暗い帯)
+      float pageShadow = smoothstep(0.0,  0.04, dist)
+                       * (1.0 - smoothstep(0.04, 0.16, dist))
+                       * ShadowStrength;
+
+      // 紙のグレイン (元 UV で一定)
+      float grain = sin(uv.x * 647.3 + uv.y * 431.7)
+                  * cos(uv.x * 293.1 - uv.y * 517.9) * 0.010;
+
+      // ---- 各面の色 ----
+      float3 front = FrontColor + grain + highlight - FrontColor * pageShadow;
+      float3 back  = BackColor * 0.82  + grain * 0.5 + highlight * 0.6;
+      float3 scene = SceneColor.rgb;
+
+      // ---- 合成: scene → front → back ----
+      float3 color = lerp(scene, front, visible);
+      color        = lerp(color, back,  folded);
+
+      return float4(color, 1.0);
+  }

@@ -1,0 +1,107 @@
+#pragma once
+
+// ===== Fragment Shader =====
+// furcraeaHLSL CodeMaterialAsset post-process fragment.
+// Domain: Post Process
+// Recommended Blendable Location: After Tonemapping
+//
+// Compile-safe color grade + toon + texture hatching.
+//
+// Uses /Game/furcraeaTokyo/CodeMaterialAsset/PostProcess/T_Stroke-01
+// as a diagonal hatching texture.
+//
+// Important:
+// - Does not use SceneTextureLookup.
+// - Does not use CustomDepth / CustomStencil / SceneDepth.
+// - Does not use neighbor pixel sampling.
+//
+// CodeMaterialAsset:
+// - Paste this whole file into FragmentShaderCode.
+// - Leave WPO_MainCode empty.
+// - Press Save in the CodeMaterialAsset editor to regenerate the output material.
+//
+// @param Texture2D Stroke = /Game/furcraeaTokyo/CodeMaterialAsset/PostProcess/T_Stroke-01.T_Stroke-01
+// @param float EffectAmount = 0.50
+// @param float SourceTone = 1.04
+// @param float SourceContrast = 1.00
+// @param float Saturation = 0.10
+// @param float TintStrength = 0.01
+// @param float ShadowWarmth = 0.18
+// @param float HighlightWarmth = 0.04
+// @param float BlackCrush = 0.04
+// @param float ToonAmount = 0.45
+// @param float ToonSteps = 4.0
+// @param float HatchingAmount = 0.10
+// @param float HatchingScale = 2.0
+// @param float HatchingRotation = -0.62
+// @param float HatchingContrast = 1.0
+// @param float HatchingShadowStart = 0.30
+// @param float HatchingHighlightProtect = 0.72
+// @param float3 TintColor = 1.00,0.78,0.48
+// @param float3 ShadowColor = 0.32,0.20,0.11
+// @param float3 HatchColor = 0.102,0.078,0.055
+
+float4 FragmentShader(
+    float2 uv,
+    float4 SceneColor,
+    Texture2D Stroke,
+    float EffectAmount,
+    float SourceTone,
+    float SourceContrast,
+    float Saturation,
+    float TintStrength,
+    float ShadowWarmth,
+    float HighlightWarmth,
+    float BlackCrush,
+    float ToonAmount,
+    float ToonSteps,
+    float HatchingAmount,
+    float HatchingScale,
+    float HatchingRotation,
+    float HatchingContrast,
+    float HatchingShadowStart,
+    float HatchingHighlightProtect,
+    float3 TintColor,
+    float3 ShadowColor,
+    float3 HatchColor)
+{
+    float3 src = SceneColor.rgb;
+
+    float gray = dot(src, float3(0.299, 0.587, 0.114));
+    float3 saturated = lerp(float3(gray, gray, gray), src, saturate(Saturation));
+    float3 contrasted = saturate((saturated - 0.5) * SourceContrast + 0.5);
+
+    float shadowMask = 1.0 - smoothstep(0.08, 0.68, gray);
+    float highlightMask = smoothstep(0.58, 1.00, gray);
+
+    float3 graded = lerp(contrasted, contrasted * TintColor, saturate(TintStrength));
+    graded = lerp(graded, ShadowColor * max(gray, 0.06), shadowMask * saturate(ShadowWarmth));
+    graded = lerp(graded, TintColor, highlightMask * saturate(HighlightWarmth));
+    graded = saturate((graded - BlackCrush) / max(0.001, 1.0 - BlackCrush));
+    graded = saturate(graded * SourceTone);
+
+    float safeSteps = max(2.0, ToonSteps);
+    float3 toonColor = floor(graded * safeSteps) / safeSteps;
+    toonColor = lerp(graded, toonColor, saturate(ToonAmount));
+
+    float s = sin(HatchingRotation);
+    float c = cos(HatchingRotation);
+    float2 centered = uv - 0.5;
+    float2 hatchUV = float2(
+        centered.x * c - centered.y * s,
+        centered.x * s + centered.y * c
+    );
+    hatchUV = hatchUV * max(0.001, HatchingScale) + 0.5;
+
+    float strokeValue = Texture2DSample(Stroke, StrokeSampler, hatchUV).r;
+    strokeValue = saturate((strokeValue - 0.5) * HatchingContrast + 0.5);
+
+    // Dark strokes are usually the useful part of a stroke texture.
+    float hatchShape = 1.0 - strokeValue;
+    float hatchShadowMask = 1.0 - smoothstep(HatchingShadowStart, HatchingHighlightProtect, gray);
+    float hatchMask = hatchShape * hatchShadowMask * saturate(HatchingAmount);
+
+    float3 hatchedColor = lerp(toonColor, HatchColor, hatchMask);
+    float3 result = lerp(src, hatchedColor, saturate(EffectAmount));
+    return float4(result, SceneColor.a);
+}

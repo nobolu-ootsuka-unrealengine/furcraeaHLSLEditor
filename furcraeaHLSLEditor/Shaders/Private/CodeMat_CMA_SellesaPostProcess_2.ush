@@ -1,0 +1,61 @@
+#pragma once
+
+// ===== Fragment Shader =====
+  // Fragment shader — Watercolor Reveal
+  // 中心から SceneColor が水彩の滲みとともに広がる Reveal エフェクト
+  // SceneColor は自動配線 (PostProcessInput0)
+  //
+  // @param float RevealSpeed = 0.10
+  // @param float NoiseScale = 3.5
+  // @param float DetailScale = 7.5
+  // @param float DistortStrength = 0.20
+  // @param float Softness = 0.18
+  // @param float FringeWidth = 0.10
+  // @param float FringeIntensity = 0.85
+  // @param float3 PaperColor = 0.96,0.93,0.86
+  // @param float3 FringeColor = 0.48,0.57,0.80
+
+  float4 FragmentShader(
+      float2 uv,
+      float RevealSpeed, float NoiseScale, float DetailScale,
+      float DistortStrength, float Softness, float FringeWidth, float FringeIntensity,
+      float3 PaperColor, float3 FringeColor, float3 SceneColor
+  )
+  {
+      float Time = View.GameTime;
+      float progress = frac(Time * RevealSpeed);
+
+      float2 p = uv - 0.5;
+      p.x *= 0.70; // 横長楕円の reveal window (絵画っぽい横長フレーム)
+      float r = length(p) * 1.5;
+
+      // 水彩らしい有機ノイズ — 火より低速・低スケールで大きな blob 形状に
+      float n = sin(p.x * NoiseScale + Time * 0.18) * cos(p.y * NoiseScale * 1.1 - Time * 0.14);
+      n += sin(p.x * DetailScale - Time * 0.29) * cos(p.y * DetailScale + Time * 0.23) * 0.45;
+      n += sin((p.x * 1.2 + p.y) * NoiseScale * 1.7 + Time * 0.10) * 0.22;
+      n += sin(p.x * DetailScale * 2.0 - p.y * DetailScale * 1.6 + Time * 0.38) * 0.11;
+
+      float organicR    = r + n * DistortStrength;
+      float revealFront = progress;
+      float dist        = organicR - revealFront; // < 0 = scene 側, > 0 = 紙側
+
+      // Reveal マスク
+      float revealed = smoothstep(Softness, 0.0, dist);
+
+      // 水彩滲み帯 — 境界の両側 FringeWidth ずつ (常に非負)
+      float fringe = smoothstep(-Softness, 0.0, dist + FringeWidth)
+                   * smoothstep(FringeWidth + Softness, FringeWidth, dist);
+
+      // 紙側で濃く、scene 側で薄く (絵の具が紙に滲む)
+      fringe *= (0.25 + 0.75 * (1.0 - revealed));
+
+      // 水彩のにじみ濃淡 — 絵の具が溜まる場所を模倣
+      float pooling = sin(organicR * DetailScale * 1.3 + Time * 0.06) * 0.3 + 0.7;
+      fringe *= pooling;
+
+      // 合成: 紙 → 滲み(FringeColor) → シーン
+      float3 color = lerp(PaperColor, SceneColor.rgb, revealed);
+      color = lerp(color, FringeColor, saturate(fringe * FringeIntensity));
+
+      return float4(color, 1.0);
+  }

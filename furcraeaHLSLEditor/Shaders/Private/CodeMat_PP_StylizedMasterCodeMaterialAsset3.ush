@@ -1,13 +1,14 @@
 #pragma once
 
 // ===== Fragment Shader =====
-  // @param Texture2D HatchTex              = /Game/3Dnchu/Textures/T_Stroke-SD11.T_Stroke-SD11
-  // @param float     HatchTiling           = 10.0
-  // @param float     OutlineThickness      = 1.0
-  // @param float     OutlineNormalThreshold= 0.3
-  // @param float3    OutlineColor          = 0.0,0.0,0.0
-  // @param float     ToonSteps             = 4.0
-  // @param float     HatchDarkThreshold    = 0.4
+  // @param Texture2D HatchTex               = /Game/3Dnchu/Textures/T_Stroke-SD11.T_Stroke-SD11
+  // @param float     HatchTiling            = 10.0
+  // @param float3    HatchColor             = 0.1,0.1,0.1
+  // @param float     OutlineThickness       = 1.0
+  // @param float     OutlineNormalThreshold = 0.3
+  // @param float3    OutlineColor           = 0.0,0.0,0.0
+  // @param float     ToonSteps              = 4.0
+  // @param float     HatchDarkThreshold     = 0.4
 
   float3 PP_ToonHatching_BGOnly(
       float2    uv,
@@ -15,6 +16,7 @@
       float4    CustomStencil,
       Texture2D HatchTex,
       float     HatchTiling,
+      float3    HatchColor,
       float     OutlineThickness,
       float     OutlineNormalThreshold,
       float3    OutlineColor,
@@ -25,12 +27,12 @@
       float2 px    = View.BufferSizeAndInvSize.zw * OutlineThickness;
       float3 color = SceneColor.rgb;
 
-      // キャラ判定: CustomStencil.r は 0–255 (stencil=2 → isCharacter=1)
+      // キャラ判定
       float stencilVal  = CustomStencil.r;
       float isCharacter = step(1.5, stencilVal) * (1.0 - step(2.5, stencilVal));
       float applyPP     = 1.0 - isCharacter;
 
-      // ── WorldNormal アウトライン ──────────────────────────────
+      // WorldNormal アウトライン
       float3 n  = SceneTextureLookup(bufUV,                     8, false).rgb * 2.0 - 1.0;
       float3 nR = SceneTextureLookup(bufUV + float2( px.x, 0), 8, false).rgb * 2.0 - 1.0;
       float3 nL = SceneTextureLookup(bufUV + float2(-px.x, 0), 8, false).rgb * 2.0 - 1.0;
@@ -40,18 +42,18 @@
       float edgeN   = length(n - nR) + length(n - nL) + length(n - nU) + length(n - nD);
       float outline = step(OutlineNormalThreshold, edgeN);
 
-      // ── トゥーンシェーダー ────────────────────────────────────
+      // トゥーンシェーダー
       float lum     = dot(color, float3(0.299, 0.587, 0.114));
       float toonLum = floor(lum * ToonSteps + 0.5) / ToonSteps;
       float3 toon   = color * (toonLum / max(lum, 0.0001));
 
-      // ── テクスチャハッチング ──────────────────────────────────
-      // 暗いピクセルだけハッチを適用 (明るい部分は素のトゥーンを維持)
+      // テクスチャハッチング（暗い領域でテクスチャの白→HatchColor に置換）
       float4 hatchSamp = Texture2DSample(HatchTex, HatchTexSampler, bufUV * HatchTiling);
-      float  hatch     = lerp(1.0, hatchSamp.r, step(toonLum, HatchDarkThreshold));
+      float  hatchMask = step(toonLum, HatchDarkThreshold) * (1.0 - hatchSamp.r);
+      float3 toonHatched = lerp(toon, HatchColor, hatchMask);
 
-      // ── 合成 ─────────────────────────────────────────────────
-      float3 stylized = lerp(OutlineColor, toon * hatch, 1.0 - outline);
+      // 合成
+      float3 stylized = lerp(OutlineColor, toonHatched, 1.0 - outline);
 
       return lerp(color, stylized, applyPP);
   }

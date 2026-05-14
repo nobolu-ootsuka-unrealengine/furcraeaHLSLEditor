@@ -1,0 +1,44 @@
+#pragma once
+
+// ===== Fragment Shader =====
+// furcraeaHLSL CodeMaterialAsset fragment code for the animated book pages.
+// Entry: float3 FragmentShader(float2 uv, ...) -> EmissiveColor
+//
+// Import the textures under /Game/texture/ or adjust the default paths below.
+// The FBX already uses spread UVs:
+//   left/back page half:  U 0.0 .. 0.5, horizontally mirrored
+//   right/front page half: U 0.5 .. 1.0
+// So this shader samples uv directly. Do not remap U again in the material.
+//
+// @param Texture2D PaperAnim1 = /Game/texture/paperTexture_anim1.paperTexture_anim1
+// @param Texture2D PaperAnim2 = /Game/texture/paperTexture_anim2.paperTexture_anim2
+// @param float AnimFPS = 2.0
+// @param float BlendSoftness = 0.12
+// @param float AnimTimeOffset = 0.0
+// @param float Brightness = 1.0
+
+float3 FragmentShader(
+    float2 uv,
+    Texture2D PaperAnim1,
+    Texture2D PaperAnim2,
+    float AnimFPS,
+    float BlendSoftness,
+    float AnimTimeOffset,
+    float Brightness,
+    float Time)
+{
+    float safeFPS = (AnimFPS <= 0.001) ? 2.0 : AnimFPS;
+    float phase = frac(max(Time + AnimTimeOffset, 0.0) * safeFPS);
+
+    // Continuous 1 -> 2 -> 1 crossfade. This avoids frame-step ambiguity in UE.
+    float blend = 0.5 - 0.5 * cos(phase * 6.28318530718);
+
+    // Optional sharpening. 0.0 = smooth sine crossfade, 1.0 = harder two-frame feel.
+    float sharpness = saturate(BlendSoftness);
+    float hardBlend = smoothstep(0.35, 0.65, blend);
+    blend = lerp(blend, hardBlend, sharpness);
+
+    float3 c1 = Texture2DSample(PaperAnim1, PaperAnim1Sampler, uv).rgb;
+    float3 c2 = Texture2DSample(PaperAnim2, PaperAnim2Sampler, uv).rgb;
+    return lerp(c1, c2, blend) * max(Brightness, 1.0);
+}

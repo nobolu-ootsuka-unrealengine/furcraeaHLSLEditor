@@ -1,0 +1,68 @@
+#pragma once
+
+// ===== Fragment Shader =====
+  // Fragment shader — Cereza Flame Burn Wipe
+  // Radial wipe: StartColor → fire edge → GoalColor
+  //
+  // @param float BurnSpeed = 0.12
+  // @param float BaseNoiseScale = 18.0
+  // @param float DetailNoiseScale = 9.0
+  // @param float DistortStrength = 0.18
+  // @param float Softness = 0.12
+  // @param float EdgeWidth = 0.08
+  // @param float GlowIntensity = 5.0
+  // @param float GradientDepth = 0.12
+  // @param float3 StartColor = 0.94,0.87,0.70
+  // @param float3 GoalColor = 0.15,0.55,0.15
+  // @param float3 BorderColor = 0.0,0.0,0.0
+  // @param float3 FireInnerColor = 1.0,1.0,1.0
+  // @param float3 FireOuterColor = 1.0,1.0,1.0
+
+  float4 FragmentShader(
+      float2 uv,
+      float BurnSpeed, float BaseNoiseScale, float DetailNoiseScale,
+      float DistortStrength, float Softness, float EdgeWidth, float GlowIntensity,
+      float GradientDepth,
+      float3 StartColor, float3 GoalColor, float3 BorderColor,
+      float3 FireInnerColor, float3 FireOuterColor
+  )
+  {
+      float Time = View.GameTime;
+      float progress = frac(Time * BurnSpeed);
+
+      float2 p = uv - 0.5;
+      float r = length(p) * 1.4142;
+
+      float n = sin(p.x * BaseNoiseScale + Time * 0.7) * cos(p.y * BaseNoiseScale - Time * 0.5);
+      n += sin(p.x * DetailNoiseScale - Time * 1.1) * cos(p.y * DetailNoiseScale + Time * 0.9) * 0.5;
+      n += sin((p.x + p.y) * BaseNoiseScale * 0.7 + Time * 0.3) * 0.25;
+
+      float organicR  = r + n * DistortStrength;
+      float burnFront = progress;
+      // dist < 0 = 燃え済み内部, dist > 0 = 未燃焼
+      float dist      = organicR - burnFront;
+
+      float burned = smoothstep(Softness, 0.0, dist);
+
+      // 燃え際を跨ぐ火炎帯（常に非負）
+      float fireZone  = smoothstep(-Softness, 0.0, dist)
+                      * smoothstep(EdgeWidth + Softness, EdgeWidth, dist);
+      float sideMask  = smoothstep(-Softness, 0.0, dist);  // 0=内側, 1=外側
+      float innerFire = fireZone * (1.0 - sideMask);       // 燃え済み側のグロー
+      float outerFire = fireZone * sideMask;                // 未燃焼側のグロー
+      float sparkle   = outerFire * (sin(organicR * 40.0 + Time * 5.0) * 0.5 + 0.5);
+
+      // BorderColor: 燃え際の対称リング（黒い線の代わり）
+      float border = smoothstep(-Softness, 0.0, -abs(dist));
+
+      float gradientT    = saturate((burnFront - organicR) / max(GradientDepth, 0.001));
+      float3 burnedColor = lerp(StartColor, GoalColor, gradientT);
+      float3 color       = lerp(StartColor, burnedColor, burned);
+
+      color = lerp(color, BorderColor, border * 0.85);
+
+      color += FireInnerColor * innerFire * GlowIntensity * 0.4;
+      color += (FireOuterColor * outerFire + FireOuterColor * sparkle * 0.65) * GlowIntensity;
+
+      return float4(color, 1.0);
+  }

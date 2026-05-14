@@ -1,0 +1,69 @@
+#pragma once
+
+// ===== Fragment Shader =====
+  // Fragment shader — Page Turn (curved fold)
+  // ref: https://esprog.hatenablog.com/entry/2016/03/13/130506
+  // SceneColor は自動配線 (PostProcessInput0)
+  //
+  // TurnSpeed > 0 → Time 自動アニメーション
+  // TurnSpeed = 0 → Flip を Blueprint で手動制御 (1=全開, -1=めくり完了)
+  //
+  // @param float TurnSpeed = 0.15
+  // @param float Flip = 1.0
+  // @param float Curvature = 0.20
+  // @param float WaveAmp = 0.10
+  // @param float CurlWidth = 0.007
+  // @param float ShadowStrength = 0.28
+  // @param float3 FrontColor = 0.97,0.94,0.87
+  // @param float3 BackColor = 0.74,0.70,0.62
+
+  float4 FragmentShader(
+      float2 uv,
+      float TurnSpeed, float Flip, float Curvature, float WaveAmp,
+      float CurlWidth, float ShadowStrength,
+      float3 FrontColor, float3 BackColor, float3 SceneColor
+  )
+  {
+      float Time = View.GameTime;
+      float flip = (TurnSpeed > 0.001)
+                 ? (1.0 - frac(Time * TurnSpeed) * 2.0)
+                 : Flip;
+
+      float2 u = float2(uv.x, 1.0 - uv.y); // Unity UV 系に合わせて y 反転
+
+      // ---- 3 本のライン ----
+      // l0: 放物線カーブ — 上下端は早く、中心は遅れて追従 (自然な紙のたわみ)
+      float curve = Curvature * 4.0 * u.y * (1.0 - u.y); // y=0,1 で 0、y=0.5 で Curvature
+      float l0 = u.x - flip + curve;
+      float l1 = flip       + WaveAmp * sin(u.y * 3.0);
+      float l2 = 1.0 - flip + WaveAmp * cos(u.x * 2.0);
+
+      // step → smoothstep でエッジを柔らかく
+      float softW   = 0.012;
+      float visible = smoothstep(-softW,  softW, u.y - l0);
+      float e1      = smoothstep(-softW,  softW, u.x - l1);
+      float e2      = smoothstep(-softW,  softW, l2  - u.y);
+      float folded  = e1 * e2 * visible;
+
+      // ---- fold ライン演出 (曲線 l0 ベース) ----
+      float dist      = (u.y - l0) * 0.7071;
+      float highlight = exp(-abs(dist) / max(CurlWidth, 0.001)) * 0.50;
+      float pageShadow = smoothstep(0.0,  0.04, dist)
+                       * (1.0 - smoothstep(0.04, 0.16, dist))
+                       * ShadowStrength;
+
+      // 紙のグレイン
+      float grain = sin(uv.x * 647.3 + uv.y * 431.7)
+                  * cos(uv.x * 293.1 - uv.y * 517.9) * 0.010;
+
+      // ---- 各面の色 ----
+      float3 front = FrontColor + grain + highlight - FrontColor * pageShadow;
+      float3 back  = BackColor * 0.82  + grain * 0.5 + highlight * 0.6;
+      float3 scene = SceneColor.rgb;
+
+      // ---- 合成 ----
+      float3 color = lerp(scene, front, visible);
+      color        = lerp(color, back,  folded);
+
+      return float4(color, 1.0);
+  }
