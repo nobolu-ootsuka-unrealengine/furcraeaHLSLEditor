@@ -9,32 +9,31 @@
 furcraeaHLSLEditor_UE5.8.0V9.zip  UE5.8に対応しました。  
 https://drive.google.com/file/d/14nWd_4X9uQvt6KjFlmgRbYp2LUYSth8o/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.4V8.zip　float4出力に対応しました。 
+furcraeaHLSLEditor_UE5.7.4V8.zip　float4出力に対応しました。  
 https://drive.google.com/file/d/1PaBHAT9O4m6DC6UceUtwrj5o8N9qrrhn/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.4V7.zip    ポストプロセスマテリアル対応 
+furcraeaHLSLEditor_UE5.7.4V7.zip    ポストプロセスマテリアル対応  
 https://drive.google.com/file/d/1ieBRb5zpW36LGldmREROGcWJ8WZot1Xg/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.4V6_2.zip　コーディングBugFix 
+furcraeaHLSLEditor_UE5.7.4V6_2.zip　コーディングBugFix  
 https://drive.google.com/file/d/1BzMiQt4dXcu8p-dIfkyH3v1SRVSKjiCn/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.4V6.zip　コーディングBugFix 
+furcraeaHLSLEditor_UE5.7.4V6.zip　コーディングBugFix  
 https://drive.google.com/file/d/1APYn65u1yo3xkJlDFmqJ2yuCE5zHViqc/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.4V5.zip     関数インライン化によるコンパイラ整理 
+furcraeaHLSLEditor_UE5.7.4V5.zip     関数インライン化によるコンパイラ整理  
 https://drive.google.com/file/d/1YiUHmR1g6d9WwvAtd1rGADsiNZEXRMNX/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.4.zip (V4)　FragmentShader とVertexShader(Optional)に分離 
+furcraeaHLSLEditor_UE5.7.4.zip (V4)　FragmentShader とVertexShader(Optional)に分離  
 https://drive.google.com/file/d/1gInP7W5hFB3pwlwbrbkekSzC8xOwusap/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.3V4.zip　ユーザーが作った)CodeMaterialAssetと同じフォルダに変更 
+furcraeaHLSLEditor_UE5.7.3V4.zip　ユーザーが作った)CodeMaterialAssetと同じフォルダに変更  
 https://drive.google.com/file/d/1XhVZgV6FRiyGOOquqO5nJVFXbmg_8DA-/view?usp=sharing
 
-furcraeaHLSLEditor_UE5.7.3V3.zip　Projects と RenderCore を bBuildEditorをガード外に移動 
-https://drive.google.com/file/d/1Qmz5Y_uT0VGKkrk1wskvw2DRbnND6or4/view?
-usp=drive_link
+furcraeaHLSLEditor_UE5.7.3V3.zip　Projects と RenderCore を bBuildEditorをガード外に移動  
+https://drive.google.com/file/d/1Qmz5Y_uT0VGKkrk1wskvw2DRbnND6or4/view?usp=drive_link
 
-furcraeaHLSLEditor_UE5.7.3V2.zip　１つしかCodeMatUser.ushがない不備修正 
+furcraeaHLSLEditor_UE5.7.3V2.zip　１つしかCodeMatUser.ushがない不備修正  
 https://drive.google.com/file/d/1CSXmSebk7hLM02qM5jKDv2ndNJ4jhUi7/view?usp=sharing
 
 
