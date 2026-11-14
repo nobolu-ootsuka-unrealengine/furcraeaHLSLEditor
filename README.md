@@ -6,6 +6,10 @@
 
 ０，以下のリンクをダウンロード
 
+
+furcraeaHLSLEditor_UE5.8.4V11.zip  UE5.8.4に対応しました。  
+https://drive.google.com/file/d/1hN0s3ez65BqH-89AiFlTGttFLvpBLxU9/view?usp=sharing
+
 furcraeaHLSLEditor_UE5.8.3V10.zip  UE5.8.3に対応しました。  
 https://drive.google.com/file/d/1h1qsR7_dYPY4O7ozJdkYlksp7mThNWsO/view?usp=sharing
 
