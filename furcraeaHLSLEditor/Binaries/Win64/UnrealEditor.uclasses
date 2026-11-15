@@ -1,0 +1,28 @@
+{
+  "BuildId": "60351404",
+  "Modules": {
+    "furcraeaHLSLEditor": {
+      "Classes": [
+        "CodeMaterialAsset"
+      ],
+      "Structs": [],
+      "Enums": [
+        "ECodeMatBlendableLocation",
+        "ECodeMatDomain",
+        "ECodeMatOutputMode"
+      ],
+      "Delegates": [],
+      "ScriptNames": {}
+    },
+    "furcraeaHLSLEditorEditor": {
+      "Classes": [
+        "CodeMatScriptLibrary",
+        "CodeMaterialAssetFactory"
+      ],
+      "Structs": [],
+      "Enums": [],
+      "Delegates": [],
+      "ScriptNames": {}
+    }
+  }
+}

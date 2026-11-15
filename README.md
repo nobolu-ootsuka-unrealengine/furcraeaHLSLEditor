@@ -6,6 +6,9 @@
 
 ０，以下のリンクをダウンロード
 
+furcraeaHLSLEditor_UE5.9.0V13.zip UE5.9.0に対応しました。
+https://drive.google.com/file/d/12sJz43gR2_w16tpV6S0_EdxBBJX4skUq/view?usp=sharing
+
 furcraeaHLSLEditor_UE5.8.4V12.zip  純粋なマテリアル作成機能に対応しました。  
 https://drive.google.com/file/d/14tmTjLXMbveOcv6C1kJ8Gh3UzJxJNYsI/view?usp=sharing
 
