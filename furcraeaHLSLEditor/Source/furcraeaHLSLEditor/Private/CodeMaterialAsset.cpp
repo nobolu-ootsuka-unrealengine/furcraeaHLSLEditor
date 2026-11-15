@@ -1,7 +1,6 @@
 // Plugins/furcraeaHLSLEditor/Source/furcraeaHLSLEditor/Private/CodeMaterialAsset.cpp
 
 #include "CodeMaterialAsset.h"
-#include "CodeMaterialCompiler.h"
 
 #if WITH_EDITOR
 #include "Materials/Material.h"
@@ -11,10 +10,15 @@
 
 UCodeMaterialAsset::UCodeMaterialAsset()
 {
-    // Default template: character outline (cel shader — shell extrusion)
-    // Demonstrates @param auto-wiring and WPO usage.
+    FragmentShaderCode = GetDefaultFragmentCode();
+    VertexShaderCode   = GetDefaultVertexCode();
+    OutputMaterial     = nullptr;
+}
 
-    FragmentShaderCode =
+FString UCodeMaterialAsset::GetDefaultFragmentCode()
+{
+    // OutlineColor は関数引数として宣言すると、生成される VectorParameter に自動配線される
+    return
         TEXT("// Fragment shader — Character Outline\n")
         TEXT("// Entry: float3 FragmentShader(float2 uv, ...) -> EmissiveColor\n")
         TEXT("//\n")
@@ -24,8 +28,13 @@ UCodeMaterialAsset::UCodeMaterialAsset()
         TEXT("{\n")
         TEXT("    return OutlineColor;\n")
         TEXT("}\n");
+}
 
-    VertexShaderCode =
+FString UCodeMaterialAsset::GetDefaultVertexCode()
+{
+    // VertexNormal → VertexNormalWS (名前に "Normal")、OutlineWidth → ScalarParameter に自動配線。
+    // WPO が有効なとき、コンパイラは TwoSided / Masked / TwoSidedSign * -1 → OpacityMask を自動設定する。
+    return
         TEXT("// Vertex shader — Character Outline (Shell Extrusion)\n")
         TEXT("// Entry: float3 WPO_Main(float3 VertexNormal, ...) -> WorldPositionOffset\n")
         TEXT("// Leave this pane empty (or all commented out) to disable WPO.\n")
@@ -36,27 +45,17 @@ UCodeMaterialAsset::UCodeMaterialAsset()
         TEXT("{\n")
         TEXT("    return normalize(VertexNormal) * OutlineWidth;\n")
         TEXT("}\n");
-
-    OutputMaterial = nullptr;
 }
 
 #if WITH_EDITOR
-void UCodeMaterialAsset::PostEditChangeProperty(FPropertyChangedEvent& E)
-{
-    Super::PostEditChangeProperty(E);
-    // Auto-compile on property change is intentionally disabled (Save button driven)
-}
-
 void UCodeMaterialAsset::PostLoad()
 {
     Super::PostLoad();
 
-    // 起動時クラッシュ対策 (UE5.7 OptionalDataSize == -1 バグ回避):
-    // 保存済みの OutputMaterial の Custom Expression コードに裸の Time 参照が
-    // 残っている場合、View.GameTime バインドを先頭に注入してコンパイルエラーを防ぐ。
-    // これにより、エディタで保存 → 再起動のたびにクラッシュするループを断ち切る。
+    // 起動時クラッシュ対策 (UE5.7 OptionalDataSize == -1):
+    // 保存済み OutputMaterial の Custom ノードに裸の Time 参照が残っていると
+    // コンパイルエラー → 再起動のたびにクラッシュするため、View.GameTime の束縛を先頭へ注入する。
     if (!OutputMaterial) return;
-
     UMaterialEditorOnlyData* ED = OutputMaterial->GetEditorOnlyData();
     if (!ED) return;
 
@@ -69,17 +68,17 @@ void UCodeMaterialAsset::PostLoad()
         UMaterialExpressionCustom* Custom = Cast<UMaterialExpressionCustom>(Expr);
         if (!Custom) continue;
 
-        if (FRegexMatcher(TimePat, Custom->Code).FindNext() &&
-            !FRegexMatcher(FloatTimePat, Custom->Code).FindNext())
+        // Time を入力ピンで受け取っているノードは対象外 (注入すると引数の再定義エラーになる)
+        const bool bHasTimeInput = Custom->Inputs.ContainsByPredicate(
+            [](const FCustomInput& In) { return In.InputName.ToString().Equals(TEXT("Time"), ESearchCase::IgnoreCase); });
+        if (bHasTimeInput) continue;
+
+        if (FRegexMatcher(TimePat, Custom->Code).FindNext() && !FRegexMatcher(FloatTimePat, Custom->Code).FindNext())
         {
             Custom->Code = TEXT("float Time = View.GameTime;\n") + Custom->Code;
             bPatched = true;
         }
     }
-
-    if (bPatched)
-    {
-        OutputMaterial->MarkPackageDirty();
-    }
+    if (bPatched) OutputMaterial->MarkPackageDirty();
 }
 #endif

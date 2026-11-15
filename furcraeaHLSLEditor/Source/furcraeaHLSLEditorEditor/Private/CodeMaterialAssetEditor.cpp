@@ -1,762 +1,435 @@
-// Plugins/furcraeaHLSLEditor/Source/furcraeaHLSLEditor/Private/CodeMaterialAssetEditor.cpp
+// Plugins/furcraeaHLSLEditor/Source/furcraeaHLSLEditorEditor/Private/CodeMaterialAssetEditor.cpp
 
 #include "CodeMaterialAssetEditor.h"
 
-#include "CodeMaterialAsset.h"
 #include "CodeMaterialCompiler.h"
-#include "furcraeaHLSLEditorStyle.h"
+#include "CodeMatCodeValidation.h"
+#include "CodeSyntaxHighlighter.h"
 
-#include "Toolkits/AssetEditorToolkit.h"
-
+#include "EditorAssetLibrary.h"
 #include "Framework/Docking/TabManager.h"
 #include "Framework/MultiBox/MultiBoxBuilder.h"
+#include "Framework/Notifications/NotificationManager.h"
+#include "HAL/PlatformApplicationMisc.h"
+#include "Materials/Material.h"
+#include "Misc/FileHelper.h"
+#include "Misc/MessageDialog.h"
+#include "Misc/Paths.h"
+#include "Styling/AppStyle.h"
 #include "Widgets/Docking/SDockTab.h"
-#include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Input/SComboBox.h"
+#include "Widgets/Input/SMultiLineEditableTextBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SBox.h"
 #include "Widgets/Layout/SSplitter.h"
+#include "Widgets/Notifications/SNotificationList.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Text/STextBlock.h"
 
-#include "Styling/AppStyle.h"
-#include "UObject/Package.h"
-#include "UObject/GCObject.h"
-#include "Misc/MessageDialog.h"
-#include "Internationalization/Regex.h"
-#include "CodeSyntaxHighlighter.h"
-
-
-#include "Materials/Material.h"
-#include "Editor.h"
-#include "EditorAssetLibrary.h"
-
 #define LOCTEXT_NAMESPACE "CodeMaterialAssetEditor"
 
-static const FName CodeMaterialAssetEditorAppIdentifier(TEXT("CodeMaterialAssetEditorApp"));
-static const FName ShaderTabId(TEXT("CodeMaterialAssetEditor_ShaderTab"));
-
-/** Custom asset editor toolkit for UCodeMaterialAsset */
-class FCodeMaterialAssetEditorToolkit : public FAssetEditorToolkit, public FGCObject
+namespace
 {
-public:
-	FCodeMaterialAssetEditorToolkit() = default;
-	virtual ~FCodeMaterialAssetEditorToolkit() override = default;
-
-	void Init(EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, TObjectPtr<UCodeMaterialAsset> InAsset)
-	{
-		Asset = InAsset;
-		check(Asset);
-
-		// Domain コンボボックスの選択肢を初期化
-		DomainOptions = {
-			MakeShared<FString>(TEXT("Surface")),
-			MakeShared<FString>(TEXT("Post Process")),
-		};
-		SelectedDomain = (Asset->Domain == ECodeMatDomain::PostProcess)
-			? DomainOptions[1] : DomainOptions[0];
-
-		// BlendableLocation コンボボックスの選択肢を初期化
-		BlendLocOptions = {
-			MakeShared<FString>(TEXT("After Tonemapping")),
-			MakeShared<FString>(TEXT("Before Tonemapping")),
-			MakeShared<FString>(TEXT("Before Translucency")),
-			MakeShared<FString>(TEXT("Replacing Tonemapper")),
-		};
-		SelectedBlendLoc = BlendLocOptions[(int32)Asset->BlendableLocation < BlendLocOptions.Num()
-			? (int32)Asset->BlendableLocation : 0];
-
-		// レイアウト
-		const TSharedRef<FTabManager::FLayout> StandaloneDefaultLayout =
-			FTabManager::NewLayout("CodeMaterialAssetEditor_Layout_v3")
-			->AddArea
-			(
-				FTabManager::NewPrimaryArea()
-				->SetOrientation(Orient_Vertical)
-				->Split
-				(
-					FTabManager::NewStack()
-					->AddTab(ShaderTabId, ETabState::OpenedTab)
-					->SetHideTabWell(true)
-				)
-			);
-
-		//
-		FAssetEditorToolkit::InitAssetEditor(
-			Mode,
-			InitToolkitHost,
-			CodeMaterialAssetEditorAppIdentifier,
-			StandaloneDefaultLayout,
-			/*bCreateDefaultStandaloneMenu=*/true,
-			/*bCreateDefaultToolbar=*/true,
-			Asset.Get()
-		);
-
-		//
-		ExtendToolbar();
-		RegenerateMenusAndToolbars();
-	}
-
-	// ------------------------------
-	// FAssetEditorToolkit overrides
-	// ------------------------------
-
-	virtual FName GetToolkitFName() const override { return FName("CodeMaterialAssetEditor"); }
-	virtual FText GetBaseToolkitName() const override { return LOCTEXT("AppLabel", "Code Material Asset"); }
-	virtual FString GetWorldCentricTabPrefix() const override { return TEXT("CodeMaterialAsset"); }
-	virtual FLinearColor GetWorldCentricTabColorScale() const override { return FLinearColor(0.2f, 0.6f, 1.0f, 1.0f); }
-
-	virtual void RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager) override
-	{
-		FAssetEditorToolkit::RegisterTabSpawners(InTabManager);
-
-		InTabManager->RegisterTabSpawner(
-			ShaderTabId,
-			FOnSpawnTab::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::SpawnShaderTab)
-		)
-			.SetDisplayName(LOCTEXT("ShaderTabTitle", "Shaders"))
-			.SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Details"));
-	}
-
-	virtual void UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager) override
-	{
-		InTabManager->UnregisterTabSpawner(ShaderTabId);
-		FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
-	}
-
-	// ------------------------------
-	// FGCObject overrides
-	// ------------------------------
-
-	virtual void AddReferencedObjects(FReferenceCollector& Collector) override
-	{
-		// UE5.7 FTObjectPtr
-		Collector.AddReferencedObject(Asset);
-	}
-
-	virtual FString GetReferencerName() const override
-	{
-		return TEXT("FCodeMaterialAssetEditorToolkit");
-	}
-
-	// ------------------------------
-	// Toolbar
-	// ------------------------------
-
-	void ExtendToolbar()
-	{
-		TSharedPtr<FExtender> Extender = MakeShared<FExtender>();
-		Extender->AddToolBarExtension(
-			"Asset",
-			EExtensionHook::After,
-			GetToolkitCommands(),
-			FToolBarExtensionDelegate::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::FillToolbar)
-		);
-		AddToolbarExtender(Extender);
-	}
-
-private:
-	TSharedRef<SDockTab> SpawnShaderTab(const FSpawnTabArgs& Args)
-	{
-		check(Args.GetTabId() == ShaderTabId);
-		check(Asset);
-
-		// Fragment pane
-		TSharedRef<ITextLayoutMarshaller> FragHighlighter = FCodeSyntaxHighlighter::Create();
-		SAssignNew(FragmentTextBox, SMultiLineEditableTextBox)
-			.Text(FText::FromString(Asset->FragmentShaderCode))
-			.Font(FAppStyle::GetFontStyle("MonoFont"))
-			.Marshaller(FragHighlighter)
-			.AlwaysShowScrollbars(true)
-			.AutoWrapText(false)
-			.OnTextChanged(this, &FCodeMaterialAssetEditorToolkit::OnFragmentTextChanged);
-
-		// Vertex pane
-		TSharedRef<ITextLayoutMarshaller> VertHighlighter = FCodeSyntaxHighlighter::Create();
-		SAssignNew(VertexTextBox, SMultiLineEditableTextBox)
-			.Text(FText::FromString(Asset->VertexShaderCode))
-			.Font(FAppStyle::GetFontStyle("MonoFont"))
-			.Marshaller(VertHighlighter)
-			.AlwaysShowScrollbars(true)
-			.AutoWrapText(false)
-			.OnTextChanged(this, &FCodeMaterialAssetEditorToolkit::OnVertexTextChanged);
-
-		return SNew(SDockTab)
-			.TabRole(ETabRole::NomadTab)
-			[
-				SNew(SBorder)
-					.BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
-					.Padding(8.0f)
-					[
-						SNew(SVerticalBox)
-						// ---- Domain 選択行 ----
-						+ SVerticalBox::Slot()
-						.AutoHeight()
-						.Padding(0.0f, 0.0f, 0.0f, 6.0f)
-						[
-							SNew(SHorizontalBox)
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(0.0f, 0.0f, 8.0f, 0.0f)
-							[
-								SNew(STextBlock)
-									.Text(LOCTEXT("DomainLabel", "Domain:"))
-									.Font(FAppStyle::GetFontStyle("BoldFont"))
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							[
-								SNew(SComboBox<TSharedPtr<FString>>)
-									.OptionsSource(&DomainOptions)
-									.InitiallySelectedItem(SelectedDomain)
-									.OnSelectionChanged(this, &FCodeMaterialAssetEditorToolkit::OnDomainSelectionChanged)
-									.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
-									{
-										return SNew(STextBlock).Text(FText::FromString(*Item));
-									})
-									[
-										SNew(STextBlock)
-											.Text_Lambda([this]()
-											{
-												return FText::FromString(SelectedDomain.IsValid() ? *SelectedDomain : TEXT("Surface"));
-											})
-									]
-							]
-							// ---- Blendable Location (PP 時のみ表示) ----
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							.VAlign(VAlign_Center)
-							.Padding(16.0f, 0.0f, 8.0f, 0.0f)
-							[
-								SNew(STextBlock)
-									.Text(LOCTEXT("BlendLocLabel", "Blendable Location:"))
-									.Font(FAppStyle::GetFontStyle("BoldFont"))
-									.Visibility_Lambda([this]()
-									{
-										return (SelectedDomain.IsValid() && *SelectedDomain == TEXT("Post Process"))
-											? EVisibility::Visible : EVisibility::Collapsed;
-									})
-							]
-							+ SHorizontalBox::Slot()
-							.AutoWidth()
-							[
-								SNew(SBox).WidthOverride(200.0f)
-								[
-									SNew(SComboBox<TSharedPtr<FString>>)
-										.OptionsSource(&BlendLocOptions)
-										.InitiallySelectedItem(SelectedBlendLoc)
-										.OnSelectionChanged(this, &FCodeMaterialAssetEditorToolkit::OnBlendLocSelectionChanged)
-										.OnGenerateWidget_Lambda([](TSharedPtr<FString> Item)
-										{
-											return SNew(STextBlock).Text(FText::FromString(*Item));
-										})
-										.Visibility_Lambda([this]()
-										{
-											return (SelectedDomain.IsValid() && *SelectedDomain == TEXT("Post Process"))
-												? EVisibility::Visible : EVisibility::Collapsed;
-										})
-										[
-											SNew(STextBlock)
-												.Text_Lambda([this]()
-												{
-													return FText::FromString(SelectedBlendLoc.IsValid() ? *SelectedBlendLoc : TEXT("After Tonemapping"));
-												})
-										]
-								]
-							]
-						]
-						// ---- Fragment / Vertex ペイン ----
-						+ SVerticalBox::Slot()
-						.FillHeight(1.0f)
-						[
-						SNew(SSplitter)
-						.Orientation(Orient_Horizontal)
-						+ SSplitter::Slot()
-						.Value(0.5f)
-						[
-							SNew(SVerticalBox)
-							+ SVerticalBox::Slot()
-							.AutoHeight()
-							.Padding(0.0f, 0.0f, 0.0f, 4.0f)
-							[
-								SNew(STextBlock)
-									.Text(LOCTEXT("FragmentLabel", "Fragment Shader"))
-									.Font(FAppStyle::GetFontStyle("BoldFont"))
-							]
-							+ SVerticalBox::Slot()
-							.FillHeight(1.0f)
-							[
-								FragmentTextBox.ToSharedRef()
-							]
-						]
-						+ SSplitter::Slot()
-						.Value(0.5f)
-						[
-							SNew(SVerticalBox)
-							+ SVerticalBox::Slot()
-							.AutoHeight()
-							.Padding(0.0f, 0.0f, 0.0f, 4.0f)
-							[
-								SNew(STextBlock)
-									.Text(LOCTEXT("VertexLabel", "Vertex Shader (optional)"))
-									.Font(FAppStyle::GetFontStyle("BoldFont"))
-							]
-							+ SVerticalBox::Slot()
-							.FillHeight(1.0f)
-							[
-								VertexTextBox.ToSharedRef()
-							]
-						] // SSplitter::Slot (Vertex)
-						] // SVerticalBox::Slot (FillHeight)
-					] // SBorder content (SVerticalBox)
-				];
-	}
-
-
-	void FillToolbar(FToolBarBuilder& ToolbarBuilder)
-	{
-		ToolbarBuilder.AddToolBarButton(
-			FUIAction(
-				FExecuteAction::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::OnClickedSave),
-				FCanExecuteAction::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::CanSave)
-			),
-			NAME_None,
-			LOCTEXT("SaveLabel", "Save"),
-			LOCTEXT("SaveTooltip", "Write editor text back to the asset and mark dirty."),
-			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Save")
-		);
-		ToolbarBuilder.AddToolBarButton(
-			FUIAction(
-				FExecuteAction::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::OnClickedReset),
-				FCanExecuteAction::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::CanReset)
-			),
-			NAME_None,
-			LOCTEXT("ResetLabel", "Reset"),
-			LOCTEXT("ResetTooltip", "Reset editor text to the default template (does not save automatically)."),
-			FSlateIcon(FAppStyle::GetAppStyleSetName(), "Icons.Refresh")
-		);
-
-	}
-
-	void OnDomainSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type)
-	{
-		SelectedDomain = NewSelection;
-	}
-
-	void OnBlendLocSelectionChanged(TSharedPtr<FString> NewSelection, ESelectInfo::Type)
-	{
-		SelectedBlendLoc = NewSelection;
-	}
-
-	void OnFragmentTextChanged(const FText& NewText)
-	{
-		WorkingFragment = NewText.ToString();
-	}
-
-	void OnVertexTextChanged(const FText& NewText)
-	{
-		WorkingVertex = NewText.ToString();
-	}
-
-	bool CanSave() const
-	{
-		return Asset != nullptr;
-	}
-
-	static FString GetDefaultFragmentCode()
-	{
-		// Sample: Character outline (cel shader) — solid outline color
-		// OutlineColor is declared as a function parameter so the compiler
-		// auto-wires it to the generated VectorParameter node.
-		return
-			TEXT("// Fragment shader — Character Outline\n")
-			TEXT("// Entry: float3 FragmentShader(float2 uv, ...) -> EmissiveColor\n")
-			TEXT("//\n")
-			TEXT("// @param float3 OutlineColor = 0.0,0.0,0.0\n")
-			TEXT("\n")
-			TEXT("float3 FragmentShader(float2 uv, float3 OutlineColor)\n")
-			TEXT("{\n")
-			TEXT("    return OutlineColor;\n")
-			TEXT("}\n");
-	}
-
-	static FString GetDefaultVertexCode()
-	{
-		// Sample: Shell extrusion outline
-		// VertexNormal is auto-wired to VertexNormalWS (name contains "Normal").
-		// OutlineWidth is auto-wired to the generated ScalarParameter node.
-		// The compiler sets TwoSided=true, BlendMode=Masked, and wires
-		// TwoSidedSign * -1 to OpacityMask automatically when WPO is active.
-		return
-			TEXT("// Vertex shader — Character Outline (Shell Extrusion)\n")
-			TEXT("// Entry: float3 WPO_Main(float3 VertexNormal, ...) -> WorldPositionOffset\n")
-			TEXT("// Leave this pane empty (or all commented out) to disable WPO.\n")
-			TEXT("//\n")
-			TEXT("// @param float OutlineWidth = 0.3\n")
-			TEXT("\n")
-			TEXT("float3 WPO_Main(float3 VertexNormal, float OutlineWidth)\n")
-			TEXT("{\n")
-			TEXT("    return normalize(VertexNormal) * OutlineWidth;\n")
-			TEXT("}\n");
-	}
-
-
-	// Strip // and /* */ comments for validation purposes
-	static FString StripComments(const FString& Code)
-	{
-		FString Out = Code;
-		// Single-line comments
-		{
-			FRegexPattern Pat(TEXT("//[^\n]*"));
-			FRegexMatcher M(Pat, Out);
-			while (M.FindNext())
-			{
-				const int32 Begin = M.GetMatchBeginning();
-				const int32 End   = M.GetMatchEnding();
-				Out.RemoveAt(Begin, End - Begin);
-				M = FRegexMatcher(Pat, Out);
-			}
-		}
-		// Block comments
-		{
-			FRegexPattern Pat(TEXT("/\\*.*?\\*/"));
-			FRegexMatcher M(Pat, Out);
-			while (M.FindNext())
-			{
-				const int32 Begin = M.GetMatchBeginning();
-				const int32 End   = M.GetMatchEnding();
-				Out.RemoveAt(Begin, End - Begin);
-				M = FRegexMatcher(Pat, Out);
-			}
-		}
-		return Out;
-	}
-
-	// Extract the body of a function whose signature matches HeadPat
-	static bool ExtractFunctionBody(const FString& Stripped, const FRegexPattern& HeadPat, FString& OutBody, FString& OutError)
-	{
-		FRegexMatcher HeadM(HeadPat, Stripped);
-		if (!HeadM.FindNext())
-		{
-			OutError = TEXT("Entry function signature not found.");
-			return false;
-		}
-
-		const int32 HeadEnd = HeadM.GetMatchEnding();
-		const int32 OpenBracePos = Stripped.Find(TEXT("{"), ESearchCase::CaseSensitive, ESearchDir::FromStart, HeadEnd);
-		if (OpenBracePos == INDEX_NONE)
-		{
-			OutError = TEXT("Function body '{' not found.");
-			return false;
-		}
-
-		int32 Depth = 0;
-		for (int32 i = OpenBracePos; i < Stripped.Len(); ++i)
-		{
-			const TCHAR C = Stripped[i];
-			if      (C == '{') { ++Depth; }
-			else if (C == '}')
-			{
-				--Depth;
-				if (Depth == 0)
-				{
-					OutBody = Stripped.Mid(OpenBracePos + 1, i - OpenBracePos - 1);
-					return true;
-				}
-			}
-		}
-
-		OutError = TEXT("Function body '}' not found (brace mismatch).");
-		return false;
-	}
-
-	// Validate fragment shader code (required)
-	// Entry: float3/float4 <AnyName>(float2 uv, ...)        UV 座標ベース
-	//     or float3/float4 <AnyName>(float3 WorldPos, ...)  ワールド座標ベース
-	static bool ValidateFragmentCode(const FString& Code, FString& OutError)
-	{
-		if (Code.IsEmpty() || IsWhitespaceOnly(Code))
-		{
-			OutError = TEXT("Fragment shader code is empty.");
-			return false;
-		}
-
-		const FString Stripped = StripComments(Code);
-
-		// 返り値 float3 または float4、第一引数 float2/float3 であれば OK
-		const FRegexPattern EntryPat(TEXT("\\bfloat[34]\\s+\\w+\\s*\\(\\s*float[23]\\s+[A-Za-z_][A-Za-z0-9_]*"));
-		FRegexMatcher EntryM(EntryPat, Stripped);
-		if (!EntryM.FindNext())
-		{
-			OutError = TEXT("Entry signature must be: float3/float4 <FuncName>(float2 uv, ...) or float3/float4 <FuncName>(float3 WorldPos, ...)");
-			return false;
-		}
-
-		FString Body, BodyErr;
-		if (!ExtractFunctionBody(Stripped, EntryPat, Body, BodyErr))
-		{
-			OutError = BodyErr;
-			return false;
-		}
-
-		if (!Body.Contains(TEXT("return")))
-		{
-			OutError = TEXT("Fragment shader must contain a return statement.");
-			return false;
-		}
-
-		return true;
-	}
-
-	// Validate vertex shader code (optional)
-	// Entry: float3 <AnyName>(float3 VertexNormal, ...)  -> WorldPositionOffset
-	// Returns true if all active code is commented out (treated as disabled)
-	static bool ValidateVertexCode(const FString& Code, FString& OutError)
-	{
-		const FString Stripped = StripComments(Code);
-
-		if (IsWhitespaceOnly(Stripped))
-		{
-			return true; // All commented out — WPO disabled
-		}
-
-		// 関数名は任意（VertexShader は FXC 予約語なので WPO_Main 等も許可）
-		const FRegexPattern EntryPat(TEXT("\\bfloat3\\s+\\w+\\s*\\(\\s*float3\\s+[A-Za-z_][A-Za-z0-9_]*"));
-		FRegexMatcher EntryM(EntryPat, Stripped);
-		if (!EntryM.FindNext())
-		{
-			OutError = TEXT("Vertex entry signature must be: float3 <FuncName>(float3 VertexNormal, ...)");
-			return false;
-		}
-
-		FString Body, BodyErr;
-		if (!ExtractFunctionBody(Stripped, EntryPat, Body, BodyErr))
-		{
-			OutError = BodyErr;
-			return false;
-		}
-
-		if (!Body.Contains(TEXT("return")))
-		{
-			OutError = TEXT("Vertex shader must contain a return statement.");
-			return false;
-		}
-
-		return true;
-	}
-
-
-	static FString NormalizeCodeForSave(const FString& In)
-	{
-		// Normalize line endings to \n
-		FString Out = In;
-		Out.ReplaceInline(TEXT("\r\n"), TEXT("\n"));
-		Out.ReplaceInline(TEXT("\r"),   TEXT("\n"));
-
-		// Trim trailing whitespace from each line
-		TArray<FString> Lines;
-		Out.ParseIntoArray(Lines, TEXT("\n"), false);
-		for (FString& Line : Lines)
-		{
-			Line = Line.TrimEnd();
-		}
-
-		// Rejoin and ensure single trailing newline
-		Out = FString::Join(Lines, TEXT("\n"));
-		while (Out.EndsWith(TEXT("\n")))
-		{
-			Out.LeftChopInline(1);
-		}
-		Out += TEXT("\n");
-
-		return Out;
-	}
-
-
-
-	bool CanReset() const
-	{
-		return true;
-	}
-
-	void OnClickedReset()
-	{
-		const EAppReturnType::Type Ret = FMessageDialog::Open(
-			EAppMsgType::YesNo,
-			LOCTEXT("ResetConfirm", "Reset both shaders to the default templates?\n\n(Unsaved edits in the editor will be lost.)")
-		);
-
-		if (Ret != EAppReturnType::Yes)
-		{
-			return;
-		}
-
-		const FString FragTemplate = GetDefaultFragmentCode();
-		const FString VertTemplate = GetDefaultVertexCode();
-
-		WorkingFragment = FragTemplate;
-		WorkingVertex   = VertTemplate;
-
-		if (FragmentTextBox.IsValid()) { FragmentTextBox->SetText(FText::FromString(FragTemplate)); }
-		if (VertexTextBox.IsValid())   { VertexTextBox->SetText(FText::FromString(VertTemplate));   }
-	}
-
-
-
-
-	void OnClickedSave()
-	{
-		UE_LOG(LogTemp, Warning, TEXT("OnClickedSave() CALLED"));
-
-		if (!Asset) return;
-
-		FString NewFragment = FragmentTextBox.IsValid()
-			? FragmentTextBox->GetText().ToString()
-			: WorkingFragment;
-		FString NewVertex = VertexTextBox.IsValid()
-			? VertexTextBox->GetText().ToString()
-			: WorkingVertex;
-
-		NewFragment = NormalizeCodeForSave(NewFragment);
-		NewVertex   = NormalizeCodeForSave(NewVertex);
-
-		// Validate fragment (required)
-		FString Error;
-		if (!ValidateFragmentCode(NewFragment, Error))
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] Fragment save blocked: %s"), *Error);
-			FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Fragment save blocked.\n\n%s"), *Error)));
-			return;
-		}
-
-		// Validate vertex (optional — skip if all whitespace after normalization)
-		if (!IsWhitespaceOnly(NewVertex))
-		{
-			if (!ValidateVertexCode(NewVertex, Error))
-			{
-				UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] Vertex save blocked: %s"), *Error);
-				FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Vertex save blocked.\n\n%s"), *Error)));
-				return;
-			}
-		}
-
-		// Domain をドロップダウン選択から Asset に反映
-		const ECodeMatDomain NewDomain = (SelectedDomain.IsValid() && *SelectedDomain == TEXT("Post Process"))
-			? ECodeMatDomain::PostProcess : ECodeMatDomain::Surface;
-
-		// BlendableLocation をドロップダウン選択から Asset に反映
-		static const ECodeMatBlendableLocation BlendLocFromString[] = {
-			ECodeMatBlendableLocation::AfterTonemapping,
-			ECodeMatBlendableLocation::BeforeTonemapping,
-			ECodeMatBlendableLocation::BeforeTranslucency,
-			ECodeMatBlendableLocation::ReplacingTonemapper,
-		};
-		int32 BlendIdx = 0;
-		if (SelectedBlendLoc.IsValid())
-		{
-			for (int32 i = 0; i < BlendLocOptions.Num(); ++i)
-			{
-				if (*BlendLocOptions[i] == *SelectedBlendLoc) { BlendIdx = i; break; }
-			}
-		}
-		const ECodeMatBlendableLocation NewBlendLoc = BlendLocFromString[BlendIdx];
-
-		const bool bFragChanged      = (Asset->FragmentShaderCode != NewFragment);
-		const bool bVertChanged      = (Asset->VertexShaderCode   != NewVertex);
-		const bool bDomainChanged    = (Asset->Domain             != NewDomain);
-		const bool bBlendLocChanged  = (Asset->BlendableLocation  != NewBlendLoc);
-
-		if (bFragChanged || bVertChanged || bDomainChanged || bBlendLocChanged)
-		{
-			Asset->Modify();
-			Asset->FragmentShaderCode = NewFragment;
-			Asset->VertexShaderCode   = NewVertex;
-			Asset->Domain             = NewDomain;
-			Asset->BlendableLocation  = NewBlendLoc;
-
-			if (UPackage* Pkg = Asset->GetOutermost())
-			{
-				Pkg->SetDirtyFlag(true);
-			}
-		}
-
-		// Always compile
-		UMaterial* Mat = nullptr;
-		FString Err;
-
-		UE_LOG(LogTemp, Warning, TEXT("Compile start: FragChanged=%d VertChanged=%d DomainChanged=%d OutputMaterial=%s"),
-			bFragChanged ? 1 : 0, bVertChanged ? 1 : 0, bDomainChanged ? 1 : 0, *GetNameSafe(Asset->OutputMaterial));
-
-		if (CodeMat::CompileCodeAssetToMaterial(Asset, Mat, Err) && Mat)
-		{
-			UEditorAssetLibrary::SaveLoadedAsset(Mat,   /*bOnlyIfIsDirty*/ false);
-			UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false);
-			UE_LOG(LogTemp, Log, TEXT("[CodeMaterialAsset] Compile OK -> %s (%s)"),
-				*GetNameSafe(Mat), *Mat->GetPathName());
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] Compile failed: %s"), *Err);
-			FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Compile failed.\n\n%s"), *Err)));
-		}
-	}
-
-
-
-
-	static bool IsWhitespaceOnly(const FString& S)
-	{
-		for (TCHAR C : S)
-		{
-			if (!FChar::IsWhitespace(C))
-			{
-				return false;
-			}
-		}
-		return true;
-	}
-
-
-
-
-
-private:
-	TObjectPtr<UCodeMaterialAsset> Asset = nullptr;
-
-	TSharedPtr<SMultiLineEditableTextBox> FragmentTextBox;
-	TSharedPtr<SMultiLineEditableTextBox> VertexTextBox;
-	FString WorkingFragment;
-	FString WorkingVertex;
-
-	// Domain ドロップダウン
-	TArray<TSharedPtr<FString>> DomainOptions;
-	TSharedPtr<FString>         SelectedDomain;
-
-	// BlendableLocation ドロップダウン
-	TArray<TSharedPtr<FString>> BlendLocOptions;
-	TSharedPtr<FString>         SelectedBlendLoc;
-};
+const FName AppIdentifier(TEXT("CodeMaterialAssetEditorApp"));
+const FName ShaderTabId(TEXT("CodeMaterialAssetEditor_ShaderTab"));
+
+void ShowNotification(const FString& Message, bool bSuccess)
+{
+    FNotificationInfo Info(FText::FromString(Message));
+    Info.ExpireDuration = 5.0f;
+    Info.bUseLargeFont  = false;
+    TSharedPtr<SNotificationItem> Item = FSlateNotificationManager::Get().AddNotification(Info);
+    if (Item.IsValid()) Item->SetCompletionState(bSuccess ? SNotificationItem::CS_Success : SNotificationItem::CS_Fail);
+}
+
+void ShowError(const FString& Title, const FString& Detail)
+{
+    UE_LOG(LogTemp, Warning, TEXT("[CodeMaterialAsset] %s: %s"), *Title, *Detail);
+    FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("%s\n\n%s"), *Title, *Detail)));
+}
+
+/** ノード変換の注意を表示する (Custom ノードへのフォールバックが起きたときはダイアログ) */
+void ReportConversionLog(const FString& Log)
+{
+    if (Log.IsEmpty()) return;
+    UE_LOG(LogTemp, Log, TEXT("[CodeMaterialAsset]\n%s"), *Log);
+    if (Log.Contains(TEXT("fell back")))
+        FMessageDialog::Open(EAppMsgType::Ok, FText::FromString(FString::Printf(TEXT("Some functions could not be converted to material nodes:\n\n%s"), *Log)));
+    else
+        ShowNotification(Log.TrimEnd(), true);
+}
+} // namespace
 
 // ============================================================================
-// FCodeMaterialAssetEditor
+// FOptionList
 // ============================================================================
 
-void FCodeMaterialAssetEditor::InitCodeMaterialAssetEditor(
-	EToolkitMode::Type Mode,
-	const TSharedPtr<IToolkitHost>& InitToolkitHost,
-	TObjectPtr<UCodeMaterialAsset> InAsset
-)
+void FCodeMaterialAssetEditorToolkit::FOptionList::Init(std::initializer_list<const TCHAR*> Labels, int32 InitialIndex)
 {
-	check(InAsset);
+    Options.Reset();
+    for (const TCHAR* L : Labels) Options.Add(MakeShared<FString>(L));
+    Selected = Options[Options.IsValidIndex(InitialIndex) ? InitialIndex : 0];
+}
 
+int32 FCodeMaterialAssetEditorToolkit::FOptionList::GetSelectedIndex() const
+{
+    const int32 Idx = Options.IndexOfByKey(Selected);
+    return Idx == INDEX_NONE ? 0 : Idx;
+}
 
-	if (!Toolkit.IsValid())
-	{
-		Toolkit = MakeShared<FCodeMaterialAssetEditorToolkit>();
-	}
+// ============================================================================
+// Toolkit
+// ============================================================================
 
-	Toolkit->Init(Mode, InitToolkitHost, InAsset);
+void FCodeMaterialAssetEditorToolkit::Init(EToolkitMode::Type Mode, const TSharedPtr<IToolkitHost>& InitToolkitHost, UCodeMaterialAsset* InAsset)
+{
+    Asset = InAsset;
+    check(Asset);
+
+    // 並びは ECodeMatDomain / ECodeMatBlendableLocation / ECodeMatOutputMode の値と一致
+    DomainOptions.Init({ TEXT("Surface"), TEXT("Post Process") }, (int32)Asset->Domain);
+    BlendLocOptions.Init({ TEXT("After Tonemapping"), TEXT("Before Tonemapping"), TEXT("Before Translucency"), TEXT("Replacing Tonemapper") },
+                         (int32)Asset->BlendableLocation);
+    OutputModeOptions.Init({ TEXT("Custom Node (HLSL)"), TEXT("Material Nodes") }, (int32)Asset->OutputMode);
+
+    const TSharedRef<FTabManager::FLayout> Layout = FTabManager::NewLayout("CodeMaterialAssetEditor_Layout_v3")
+        ->AddArea
+        (
+            FTabManager::NewPrimaryArea()
+            ->SetOrientation(Orient_Vertical)
+            ->Split(FTabManager::NewStack()->AddTab(ShaderTabId, ETabState::OpenedTab)->SetHideTabWell(true))
+        );
+
+    InitAssetEditor(Mode, InitToolkitHost, AppIdentifier, Layout,
+                    /*bCreateDefaultStandaloneMenu*/ true, /*bCreateDefaultToolbar*/ true, Asset.Get());
+
+    TSharedPtr<FExtender> Extender = MakeShared<FExtender>();
+    Extender->AddToolBarExtension("Asset", EExtensionHook::After, GetToolkitCommands(),
+        FToolBarExtensionDelegate::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::FillToolbar));
+    AddToolbarExtender(Extender);
+    RegenerateMenusAndToolbars();
+}
+
+FName FCodeMaterialAssetEditorToolkit::GetToolkitFName() const { return FName("CodeMaterialAssetEditor"); }
+FText FCodeMaterialAssetEditorToolkit::GetBaseToolkitName() const { return LOCTEXT("AppLabel", "Code Material Asset"); }
+FString FCodeMaterialAssetEditorToolkit::GetWorldCentricTabPrefix() const { return TEXT("CodeMaterialAsset"); }
+FLinearColor FCodeMaterialAssetEditorToolkit::GetWorldCentricTabColorScale() const { return FLinearColor(0.2f, 0.6f, 1.0f, 1.0f); }
+
+void FCodeMaterialAssetEditorToolkit::RegisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
+{
+    FAssetEditorToolkit::RegisterTabSpawners(InTabManager);
+    InTabManager->RegisterTabSpawner(ShaderTabId, FOnSpawnTab::CreateRaw(this, &FCodeMaterialAssetEditorToolkit::SpawnShaderTab))
+        .SetDisplayName(LOCTEXT("ShaderTabTitle", "Shaders"))
+        .SetIcon(FSlateIcon(FAppStyle::GetAppStyleSetName(), "LevelEditor.Tabs.Details"));
+}
+
+void FCodeMaterialAssetEditorToolkit::UnregisterTabSpawners(const TSharedRef<FTabManager>& InTabManager)
+{
+    InTabManager->UnregisterTabSpawner(ShaderTabId);
+    FAssetEditorToolkit::UnregisterTabSpawners(InTabManager);
+}
+
+void FCodeMaterialAssetEditorToolkit::AddReferencedObjects(FReferenceCollector& Collector)
+{
+    Collector.AddReferencedObject(Asset);
+}
+
+FString FCodeMaterialAssetEditorToolkit::GetReferencerName() const
+{
+    return TEXT("FCodeMaterialAssetEditorToolkit");
+}
+
+// ============================================================================
+// UI
+// ============================================================================
+
+TSharedRef<SWidget> FCodeMaterialAssetEditorToolkit::MakeOptionCombo(
+    const FText& Label, const FText& Tooltip, FOptionList& List, float Width, bool bFirst, TAttribute<EVisibility> Visibility)
+{
+    TSharedRef<SWidget> Combo =
+        SNew(SComboBox<TSharedPtr<FString>>)
+        .OptionsSource(&List.Options)
+        .InitiallySelectedItem(List.Selected)
+        .OnSelectionChanged_Lambda([&List](TSharedPtr<FString> NewSelection, ESelectInfo::Type) { List.Selected = NewSelection; })
+        .OnGenerateWidget_Lambda([](TSharedPtr<FString> Item) { return SNew(STextBlock).Text(FText::FromString(*Item)); })
+        [
+            SNew(STextBlock).Text_Lambda([&List]() { return FText::FromString(List.Selected.IsValid() ? *List.Selected : FString()); })
+        ];
+    if (Width > 0.0f)
+    {
+        Combo = SNew(SBox).WidthOverride(Width)[Combo];
+    }
+
+    return SNew(SHorizontalBox)
+        .Visibility(Visibility)
+        + SHorizontalBox::Slot()
+        .AutoWidth()
+        .VAlign(VAlign_Center)
+        .Padding(bFirst ? 0.0f : 16.0f, 0.0f, 8.0f, 0.0f)
+        [
+            SNew(STextBlock)
+            .Text(Label)
+            .ToolTipText(Tooltip)
+            .Font(FAppStyle::GetFontStyle("BoldFont"))
+        ]
+        + SHorizontalBox::Slot()
+        .AutoWidth()
+        [
+            Combo
+        ];
+}
+
+TSharedRef<SWidget> FCodeMaterialAssetEditorToolkit::MakeCodePane(
+    const FText& Label, const FString& InitialText, TSharedPtr<SMultiLineEditableTextBox>& OutTextBox)
+{
+    SAssignNew(OutTextBox, SMultiLineEditableTextBox)
+        .Text(FText::FromString(InitialText))
+        .Font(FAppStyle::GetFontStyle("MonoFont"))
+        .Marshaller(FCodeSyntaxHighlighter::Create())
+        .AlwaysShowScrollbars(true)
+        .AutoWrapText(false)
+        // SMultiLineEditableText は既定で '\t' を入力不可とし、その結果 Tab キーがフォーカス移動に使われる。
+        // Tab を有効な文字にすると Tab の KeyDown がテキスト側で処理され、Tab 文字が入力される。
+        .OnIsTypedCharValid_Lambda([](const TCHAR) { return true; });
+
+    return SNew(SVerticalBox)
+        + SVerticalBox::Slot()
+        .AutoHeight()
+        .Padding(0.0f, 0.0f, 0.0f, 4.0f)
+        [
+            SNew(STextBlock).Text(Label).Font(FAppStyle::GetFontStyle("BoldFont"))
+        ]
+        + SVerticalBox::Slot()
+        .FillHeight(1.0f)
+        [
+            OutTextBox.ToSharedRef()
+        ];
+}
+
+TSharedRef<SDockTab> FCodeMaterialAssetEditorToolkit::SpawnShaderTab(const FSpawnTabArgs& Args)
+{
+    check(Args.GetTabId() == ShaderTabId);
+    check(Asset);
+
+    const TAttribute<EVisibility> PostProcessOnly = TAttribute<EVisibility>::CreateLambda([this]()
+    {
+        return GetSelectedDomain() == ECodeMatDomain::PostProcess ? EVisibility::Visible : EVisibility::Collapsed;
+    });
+
+    return SNew(SDockTab)
+        .TabRole(ETabRole::NomadTab)
+        [
+            SNew(SBorder)
+            .BorderImage(FAppStyle::GetBrush("ToolPanel.GroupBorder"))
+            .Padding(8.0f)
+            [
+                SNew(SVerticalBox)
+                // ---- 設定行 ----
+                + SVerticalBox::Slot()
+                .AutoHeight()
+                .Padding(0.0f, 0.0f, 0.0f, 6.0f)
+                [
+                    SNew(SHorizontalBox)
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [
+                        MakeOptionCombo(LOCTEXT("DomainLabel", "Domain:"), FText::GetEmpty(), DomainOptions, 0.0f, /*bFirst*/ true)
+                    ]
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [
+                        MakeOptionCombo(LOCTEXT("OutputModeLabel", "Output:"),
+                            LOCTEXT("OutputModeTooltip",
+                                "Custom Node: embed the HLSL as-is in one Custom node.\n"
+                                "Material Nodes: convert the HLSL into real material nodes (Add, Multiply, Lerp, ...).\n"
+                                "Functions that cannot be converted automatically fall back to a Custom node."),
+                            OutputModeOptions, 170.0f, false)
+                    ]
+                    + SHorizontalBox::Slot().AutoWidth()
+                    [
+                        MakeOptionCombo(LOCTEXT("BlendLocLabel", "Blendable Location:"), FText::GetEmpty(), BlendLocOptions, 200.0f, false, PostProcessOnly)
+                    ]
+                ]
+                // ---- Fragment / Vertex ペイン ----
+                + SVerticalBox::Slot()
+                .FillHeight(1.0f)
+                [
+                    SNew(SSplitter)
+                    .Orientation(Orient_Horizontal)
+                    + SSplitter::Slot().Value(0.5f)
+                    [
+                        MakeCodePane(LOCTEXT("FragmentLabel", "Fragment Shader"), Asset->FragmentShaderCode, FragmentTextBox)
+                    ]
+                    + SSplitter::Slot().Value(0.5f)
+                    [
+                        MakeCodePane(LOCTEXT("VertexLabel", "Vertex Shader (optional)"), Asset->VertexShaderCode, VertexTextBox)
+                    ]
+                ]
+            ]
+        ];
+}
+
+void FCodeMaterialAssetEditorToolkit::FillToolbar(FToolBarBuilder& ToolbarBuilder)
+{
+    auto AddButton = [&](void (FCodeMaterialAssetEditorToolkit::*Handler)(), const FText& Label, const FText& Tooltip, const FName& Icon)
+    {
+        ToolbarBuilder.AddToolBarButton(FUIAction(FExecuteAction::CreateRaw(this, Handler)), NAME_None, Label, Tooltip,
+                                        FSlateIcon(FAppStyle::GetAppStyleSetName(), Icon));
+    };
+
+    AddButton(&FCodeMaterialAssetEditorToolkit::OnClickedSave,
+        LOCTEXT("SaveLabel", "Save"),
+        LOCTEXT("SaveTooltip", "Write editor text back to the asset, generate M_<Asset> and save."),
+        "Icons.Save");
+    AddButton(&FCodeMaterialAssetEditorToolkit::OnClickedReset,
+        LOCTEXT("ResetLabel", "Reset"),
+        LOCTEXT("ResetTooltip", "Reset editor text to the default template (does not save automatically)."),
+        "Icons.Refresh");
+
+    ToolbarBuilder.AddSeparator();
+
+    AddButton(&FCodeMaterialAssetEditorToolkit::OnClickedCopyPython,
+        LOCTEXT("CopyPythonLabel", "Copy Python"),
+        LOCTEXT("CopyPythonTooltip",
+            "Copy an Unreal Python script that builds the same material graph (current text + Output mode).\n"
+            "Paste it into Output Log > Python. Also saved to Saved/furcraeaHLSL/<Asset>.py"),
+        "GenericCommands.Copy");
+    AddButton(&FCodeMaterialAssetEditorToolkit::OnClickedCopyT3D,
+        LOCTEXT("CopyT3DLabel", "Copy T3D"),
+        LOCTEXT("CopyT3DTooltip",
+            "Copy the generated nodes as T3D text (the Material Editor's copy format).\n"
+            "Open any Material and press Ctrl+V. Nodes that feed a material pin are labelled '-> Emissive' etc."),
+        "GenericCommands.Paste");
+}
+
+// ============================================================================
+// 状態
+// ============================================================================
+
+ECodeMatDomain FCodeMaterialAssetEditorToolkit::GetSelectedDomain() const
+{
+    return (ECodeMatDomain)DomainOptions.GetSelectedIndex();
+}
+
+ECodeMatBlendableLocation FCodeMaterialAssetEditorToolkit::GetSelectedBlendLoc() const
+{
+    return (ECodeMatBlendableLocation)BlendLocOptions.GetSelectedIndex();
+}
+
+ECodeMatOutputMode FCodeMaterialAssetEditorToolkit::GetSelectedOutputMode() const
+{
+    return (ECodeMatOutputMode)OutputModeOptions.GetSelectedIndex();
+}
+
+FString FCodeMaterialAssetEditorToolkit::GetFragmentText() const
+{
+    return CodeMatValidation::NormalizeCode(FragmentTextBox.IsValid() ? FragmentTextBox->GetText().ToString() : Asset->FragmentShaderCode);
+}
+
+FString FCodeMaterialAssetEditorToolkit::GetVertexText() const
+{
+    return CodeMatValidation::NormalizeCode(VertexTextBox.IsValid() ? VertexTextBox->GetText().ToString() : Asset->VertexShaderCode);
+}
+
+FCodeMatBuildSettings FCodeMaterialAssetEditorToolkit::GatherCurrentSettings() const
+{
+    FCodeMatBuildSettings S = FCodeMatBuildSettings::FromAsset(Asset);
+    S.FragmentCode = GetFragmentText();
+    S.VertexCode   = GetVertexText();
+    S.Domain       = GetSelectedDomain();
+    S.BlendLoc     = GetSelectedBlendLoc();
+    S.OutputMode   = GetSelectedOutputMode();
+    return S;
+}
+
+// ============================================================================
+// ツールバー操作
+// ============================================================================
+
+void FCodeMaterialAssetEditorToolkit::OnClickedSave()
+{
+    if (!Asset) return;
+
+    const FCodeMatBuildSettings S = GatherCurrentSettings();
+
+    FString Error;
+    if (!CodeMatValidation::ValidateFragmentCode(S.FragmentCode, Error))
+    {
+        ShowError(TEXT("Fragment save blocked."), Error);
+        return;
+    }
+    if (!CodeMatValidation::IsWhitespaceOnly(S.VertexCode) && !CodeMatValidation::ValidateVertexCode(S.VertexCode, Error))
+    {
+        ShowError(TEXT("Vertex save blocked."), Error);
+        return;
+    }
+
+    const bool bChanged =
+        Asset->FragmentShaderCode != S.FragmentCode || Asset->VertexShaderCode != S.VertexCode ||
+        Asset->Domain != S.Domain || Asset->BlendableLocation != S.BlendLoc || Asset->OutputMode != S.OutputMode;
+    if (bChanged)
+    {
+        Asset->Modify();
+        Asset->FragmentShaderCode = S.FragmentCode;
+        Asset->VertexShaderCode   = S.VertexCode;
+        Asset->Domain             = S.Domain;
+        Asset->BlendableLocation  = S.BlendLoc;
+        Asset->OutputMode         = S.OutputMode;
+        Asset->MarkPackageDirty();
+    }
+
+    // 変更が無くても毎回コンパイルする (手動で壊れたマテリアルの再生成用)
+    UMaterial* Mat = nullptr;
+    FString Err, ConvLog;
+    if (!CodeMat::CompileCodeAssetToMaterial(Asset, Mat, Err, &ConvLog) || !Mat)
+    {
+        ShowError(TEXT("Compile failed."), Err);
+        return;
+    }
+    ReportConversionLog(ConvLog);
+    UEditorAssetLibrary::SaveLoadedAsset(Mat,   /*bOnlyIfIsDirty*/ false);
+    UEditorAssetLibrary::SaveLoadedAsset(Asset, /*bOnlyIfIsDirty*/ false);
+}
+
+void FCodeMaterialAssetEditorToolkit::OnClickedReset()
+{
+    const EAppReturnType::Type Ret = FMessageDialog::Open(EAppMsgType::YesNo,
+        LOCTEXT("ResetConfirm", "Reset both shaders to the default templates?\n\n(Unsaved edits in the editor will be lost.)"));
+    if (Ret != EAppReturnType::Yes) return;
+
+    if (FragmentTextBox.IsValid()) FragmentTextBox->SetText(FText::FromString(UCodeMaterialAsset::GetDefaultFragmentCode()));
+    if (VertexTextBox.IsValid())   VertexTextBox->SetText(FText::FromString(UCodeMaterialAsset::GetDefaultVertexCode()));
+}
+
+void FCodeMaterialAssetEditorToolkit::OnClickedCopyPython()
+{
+    if (!Asset) return;
+    const FCodeMatBuildSettings S = GatherCurrentSettings();
+    FString Script, Err, Log;
+    if (!CodeMat::ExportPythonScript(S, Script, Err, &Log))
+    {
+        ShowError(TEXT("Python export failed."), Err);
+        return;
+    }
+    FPlatformApplicationMisc::ClipboardCopy(*Script);
+
+    const FString PyPath = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("furcraeaHLSL"), S.AssetName + TEXT(".py"));
+    FFileHelper::SaveStringToFile(Script, *PyPath, FFileHelper::EEncodingOptions::ForceUTF8WithoutBOM);
+
+    ReportConversionLog(Log);
+    ShowNotification(FString::Printf(TEXT("Python script copied to clipboard\n%s"), *FPaths::ConvertRelativePathToFull(PyPath)), true);
+}
+
+void FCodeMaterialAssetEditorToolkit::OnClickedCopyT3D()
+{
+    if (!Asset) return;
+    FString Text, Err, Log;
+    if (!CodeMat::ExportT3D(GatherCurrentSettings(), Text, Err, &Log))
+    {
+        ShowError(TEXT("T3D export failed."), Err);
+        return;
+    }
+    FPlatformApplicationMisc::ClipboardCopy(*Text);
+    ReportConversionLog(Log);
+    ShowNotification(TEXT("T3D copied to clipboard - open a Material and press Ctrl+V"), true);
 }
 
 #undef LOCTEXT_NAMESPACE

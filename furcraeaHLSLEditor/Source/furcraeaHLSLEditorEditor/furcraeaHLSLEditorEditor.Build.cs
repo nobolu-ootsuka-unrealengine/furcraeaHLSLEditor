@@ -1,5 +1,6 @@
 // Plugins/furcraeaHLSLEditor/Source/furcraeaHLSLEditorEditor/furcraeaHLSLEditorEditor.Build.cs
-
+//
+// Editor モジュール: アセットエディタ / ファクトリ / Python・BP 用関数ライブラリ。
 using UnrealBuildTool;
 
 public class furcraeaHLSLEditorEditor : ModuleRules
@@ -7,8 +8,6 @@ public class furcraeaHLSLEditorEditor : ModuleRules
     public furcraeaHLSLEditorEditor(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-
-		// ★ ここに入れる
         bUseUnity = false;
 
         PublicDependencyModuleNames.AddRange(new string[]
@@ -16,42 +15,21 @@ public class furcraeaHLSLEditorEditor : ModuleRules
             "Core",
             "CoreUObject",
             "Engine",
-            "Slate",
-            "SlateCore",
             "UnrealEd",
-            "AssetTools",
-            "EditorFramework",
-            "MaterialEditor",
-            "EditorSubsystem",
-            "EditorScriptingUtilities",
-            "Projects",                // ★追加（IPluginManager）
-            // ★Runtimeモジュールに依存（これが無いと CodeMaterialAsset.h が見えない）
-            "furcraeaHLSLEditor",
-            "InputCore",               // SComboBox が EKeys を要求する
+            "EditorFramework",           // IToolkitHost
+            "furcraeaHLSLEditor",        // CodeMaterialAsset / CodeMaterialCompiler
         });
 
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Core",
-            "CoreUObject",
-            "Engine",
-            "UnrealEd",
-            "AssetTools",
-            "AssetRegistry",
             "Slate",
             "SlateCore",
-            "EditorStyle",
-            "AppFramework",
-
-            
-
-            // ★UMaterialEditingLibrary
-            "EditorScriptingUtilities",
-
-            // 任意（足して害なし）
-            "MaterialEditor",
-            "EditorSubsystem",
-            "Projects",                // ★追加（IPluginManager）
+            "InputCore",                 // SComboBox
+            "ApplicationCore",           // クリップボード (FPlatformApplicationMisc)
+            "AssetTools",
+            "EditorScriptingUtilities",  // UEditorAssetLibrary
+            "RenderCore",                // GetMaterialCompileErrors (ShaderCompiler)
+            "RHI",
         });
     }
 }

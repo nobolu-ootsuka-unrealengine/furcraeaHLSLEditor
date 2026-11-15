@@ -1,13 +1,14 @@
-//D:\Sandbox\UE57CreatePlugin4\UE57HLSLEdit\UE57HLSLEdit\Plugins\furcraeaHLSLEditor\Source\furcraeaHLSLEditor\furcraeaHLSLEditor.Build.cs
+// Plugins/furcraeaHLSLEditor/Source/furcraeaHLSLEditor/furcraeaHLSLEditor.Build.cs
+//
+// Runtime モジュール: UCodeMaterialAsset と、エディタ時のみ使う HLSL → マテリアル変換 (WITH_EDITOR)。
 using UnrealBuildTool;
 using System.IO;
+
 public class furcraeaHLSLEditor : ModuleRules
 {
     public furcraeaHLSLEditor(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
-
-        // �� �����ɓ����
         bUseUnity = false;
 
         PublicIncludePaths.Add(Path.Combine(ModuleDirectory, "Public"));
@@ -17,23 +18,22 @@ public class furcraeaHLSLEditor : ModuleRules
         {
             "Core",
             "CoreUObject",
-            "Engine"
+            "Engine",
         });
 
-        // Projects (IPluginManager) と RenderCore (ShaderCore) はランタイムでも必要
         PrivateDependencyModuleNames.AddRange(new string[]
         {
-            "Projects",
-            "RenderCore",
+            "Projects",    // IPluginManager
+            "RenderCore",  // AddShaderSourceDirectoryMapping / FlushShaderFileCache
         });
 
         if (Target.bBuildEditor)
         {
             PrivateDependencyModuleNames.AddRange(new string[]
             {
-                "UnrealEd",
+                "UnrealEd",                  // MaterialGraph / EdGraphUtilities / ObjectTools
                 "MaterialEditor",
-                "EditorScriptingUtilities",
+                "EditorScriptingUtilities",  // UEditorAssetLibrary
             });
         }
     }

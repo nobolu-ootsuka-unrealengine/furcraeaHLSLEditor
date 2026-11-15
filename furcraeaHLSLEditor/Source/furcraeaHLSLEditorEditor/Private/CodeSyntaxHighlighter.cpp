@@ -64,7 +64,7 @@ namespace CodeHL
 	class FRegexSyntaxHighlighterMarshaller : public FSyntaxHighlighterTextLayoutMarshaller
 	{
 	public:
-		// ★ MakeShared で生成したいので ctor を public にする（ここが今回の肝）
+		// MakeShared で生成するため ctor は public
 		FRegexSyntaxHighlighterMarshaller(
 			const TSharedRef<FRegexTokenizer>& InTokenizer,
 			const TMap<FName, FTextBlockStyle>& InStyles
@@ -215,7 +215,7 @@ TSharedRef<ITextLayoutMarshaller> FCodeSyntaxHighlighter::Create()
 	FTextBlockStyle Base = FAppStyle::GetWidgetStyle<FTextBlockStyle>("NormalText");
 	Base.SetFont(FAppStyle::GetFontStyle("MonoFont"));
 
-	// VSCode Dark+ の “Foreground” っぽい（#D4D4D4）
+	// 既定の文字色
 	Base.SetColorAndOpacity(FSlateColor(FLinearColor(0.83f, 0.83f, 0.83f, 1.0f)));
 
 	TMap<FName, FTextBlockStyle> Styles;
@@ -228,13 +228,12 @@ TSharedRef<ITextLayoutMarshaller> FCodeSyntaxHighlighter::Create()
 			return S;
 		};
 
-	// VSCode Dark+ 目安
-	Styles.Add("Keyword", MakeStyle(0.10f, 0.33f, 0.10f)); // #C586C0
-	Styles.Add("Type", MakeStyle(0.10f, 0.10f, 0.49f)); // #4EC9B0
-	Styles.Add("Number", MakeStyle(0.51f, 0.10f, 0.46f)); // #B5CEA8
-	Styles.Add("Comment", MakeStyle(0.32f, 0.10f, 0.23f)); // #6A9955
-	Styles.Add("Function", MakeStyle(0.10f, 0.74f, 0.29f)); // #DCDCAA (関数名っぽい)
-	Styles.Add("Parameter", MakeStyle(0.41f, 0.57f, 0.10f)); // #9CDCFE (uv みたいな識別子)
+	// 各トークンの色 (リニア値)
+	Styles.Add("Keyword", MakeStyle(0.10f, 0.33f, 0.10f));
+	Styles.Add("Type", MakeStyle(0.10f, 0.10f, 0.49f));
+	Styles.Add("Number", MakeStyle(0.51f, 0.10f, 0.46f));
+	Styles.Add("Comment", MakeStyle(0.32f, 0.10f, 0.23f));
+	Styles.Add("Function", MakeStyle(0.10f, 0.74f, 0.29f));
 
 	// Tokenizer
 	TSharedRef<CodeHL::FRegexTokenizer> Tokenizer = MakeShared<CodeHL::FRegexTokenizer>();
@@ -257,11 +256,6 @@ TSharedRef<ITextLayoutMarshaller> FCodeSyntaxHighlighter::Create()
 
 	// 6) 関数っぽいもの（識別子の直後に '(' が来る）
 	Tokenizer->Rules.Add({ TEXT("\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()"), "Function" });
-
-	// 7) 引数名っぽいもの（Main(float2 uv) の uv を狙い撃ち）
-	Tokenizer->Rules.Add({ TEXT("\\bMain\\s*\\(\\s*float2\\s+([A-Za-z_][A-Za-z0-9_]*)\\b"), "Parameter" });
-	// ↑このルールは “マッチ全体” が色付けされる実装だと uv だけに当たらない可能性あり。
-	// もしそうなら Parameter はいったん外してOK（Function/Type/Keyword/Comment/NumberだけでVSCode感は出る）
 
 	return CodeHL::FRegexSyntaxHighlighterMarshaller::Create(Tokenizer, Styles);
 #else
